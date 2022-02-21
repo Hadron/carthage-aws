@@ -1,0 +1,3 @@
+name: carthage_aws
+package: carthage_aws
+python: .
