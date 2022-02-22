@@ -1,4 +1,5 @@
 import logging
+import os
 
 from carthage import *
 from carthage.modeling import *
@@ -8,9 +9,30 @@ from carthage.dependency_injection import *
 import boto3
 from botocore.exceptions import ClientError
 
+__all__ = ['AwsConnection', 'AwsManaged']
+
+
+@inject_autokwargs(config = ConfigLayout, injector = Injector)
+class AwsManaged(AsyncInjectable, SetupTaskMixin):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    @memoproperty
+    def stamp_descriptor(self):
+        raise NotImplementedError(type(self))
+
+    @memoproperty
+    def stamp_path(self):
+        p = self.config.state_dir
+        p = os.path.join(p,"aws_stamps", self.stamp_type)
+        p += ".stamps"
+        os.makedirs(p, exist_ok=True)
+        return p
+
 
 @inject(config = ConfigLayout, injector = Injector)
-class AwsConnection(Injectable):
+class AwsConnection(AwsManaged):
 
     def __init__(self, config, injector):
         self.config = config.aws

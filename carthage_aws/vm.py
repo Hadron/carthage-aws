@@ -12,12 +12,14 @@ from carthage.image import SetupTaskMixin
 import boto3
 from botocore.exceptions import ClientError
 
-from .connection import AwsConnection
+from .connection import AwsConnection, AwsManaged
 from .network import AwsVirtualPrivateCloud, AwsSubnet
+
+__all__ = ['AwsVm']
 
 
 @inject_autokwargs(connection=AwsConnection, injector=Injector, network=InjectionKey(NetworkModel), config_layout=ConfigLayout)
-class AwsVm(Machine, SetupTaskMixin):
+class AwsVm(Machine, AwsManaged):
 
     def __init__(self, connection, injector, network, *args, **kwargs):
         self.connection = connection
@@ -30,20 +32,26 @@ class AwsVm(Machine, SetupTaskMixin):
         self.key = self.model.key
         self.imageid = self.model.imageid
         self.size = self.model.size
+        self.running = False
+        self.subnet = None
 
-    @setup_task('Construct')
+    @setup_task('construct')
     async def construct(self):
         try:
+            self.subnet = self.injector(AwsSubnet)
+            self.subnet.do_create()
             r = self.connection.client.run_instances(ImageId=self.imageid,
                                       MinCount=1,
                                       MaxCount=1,
                                       InstanceType=self.size,
-                                      KeyName=self.key
+                                      KeyName=self.key,
+                                      SubnetId=self.subnet.id
             )
             self.connection.client.create_tags(Resources=[r['Instances'][0]['InstanceId']], Tags=[{
                                                 'Key': 'Name',
                                                 'Value': self.name
                                                 }])
+            self.running = True
         except ClientError as e:
             logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
         
