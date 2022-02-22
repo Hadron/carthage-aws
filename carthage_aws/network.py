@@ -1,5 +1,6 @@
 from carthage import *
 from carthage.dependency_injection import *
+from carthage.network import TechnologySpecificNetwork, this_network
 
 from .connection import AwsConnection
 
@@ -8,18 +9,17 @@ from botocore.exceptions import ClientError
 
 
 @inject(connection = AwsConnection, injector = Injector)
-class AwsVirtualPrivateCloud(Injectable):
+class AwsVirtualPrivateCloud(TechnologySpecificNetwork, SetupTaskMixin):
 
     def __init__(self, connection, injector):
-        breakpoint()
         self.injector = injector
         self.connection = connection
         super().__init__()
-        self.do_create()
 
+    @setup_task('Construct')
     def do_create(self):
         try:
-            r = self.connection.resource("ec2", self.connection.region).create_vpc(InstanceTenancy='default',
+            r = self.connection.resource.create_vpc(InstanceTenancy='default',
                                                                                    TagSpecifications=[{
                                                                                     'ResourceType': 'vpc',
                                                                                         'Tags': [{}]
@@ -35,26 +35,32 @@ class AwsVirtualPrivateCloud(Injectable):
         return self.id
 
 
-@inject_autokwargs(connection = AwsConnection, vpc = AwsVirtualPrivateCloud, injector = Injector, v4_config = V4Config)
-class AwsSubnet(Injectable):
+@inject_autokwargs(connection = AwsConnection, vpc = AwsVirtualPrivateCloud, injector = Injector, network=NetworkModel)
+class AwsSubnet(TechnologySpecificNetwork, SetupTaskMixin):
     
-    def __init__(self, connection, vpc, injector, v4_config):
+    def __init__(self, connection, vpc, injector, network, **kwargs):
         self.connection = connection
         self.vpc = vpc
         self.injector = injector
-        self.v4_config = v4_config
-        super().__init__()
-        self.do_create()
+        self.network = network
+        if 'name' not in kwargs:
+            kwargs['name'] = kwargs['network'].name
+        super().__init__(**kwargs)
 
+    @setup_task('Construct')
     def do_create(self):
         try:
             r = self.resource.create_subnet(VpcId=self.vpc.id,
-                                            CidrBlock=str(v4_config.v4_network),
+                                            CidrBlock=str(self.network.v4_config.network),
                                             TagSpecifications=[{
                                             'ResourceType': 'subnet',
-                                            'Tags': [{}]
+                                            'Tags': [{
+                                                'Key': 'Name',
+                                                'Value': self.name
+                                            }]
                 }]
             )
+            self.network.subnetid = r['subnet']['SubnetId']
         except ClientError:
-            logger.error(f'Could not create AWS subnet for {v4_config.v4_network}.')
+            logger.error(f'Could not create AWS subnet for {self.network.v4_config.v4_network}.')
 

@@ -4,6 +4,7 @@ from carthage.config import ConfigSchema
 from carthage.config.types import ConfigString
 
 from .connection import AwsConnection
+from .network import AwsVirtualPrivateCloud, AwsSubnet
 
 
 class AwsConfig(ConfigSchema, prefix = "aws"):
@@ -24,5 +25,6 @@ def enable_new_aws_connection(injector):
 
 @inject(injector=Injector)
 def carthage_plugin(injector):
-
+    injector.add_provider(AwsVirtualPrivateCloud)
+    injector.add_provider(AwsSubnet, allow_multiple = True)
     injector(enable_new_aws_connection)
