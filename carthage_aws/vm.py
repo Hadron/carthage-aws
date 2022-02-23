@@ -45,7 +45,12 @@ class AwsVm(Machine, AwsManaged):
                                       MaxCount=1,
                                       InstanceType=self.size,
                                       KeyName=self.key,
-                                      SubnetId=self.subnet.id
+                                      NetworkInterfaces=[{
+                                          'DeviceIndex': 0,
+                                          'SubnetId': self.subnet.id,
+                                          'AssociatePublicIpAddress': True,
+                                          'Groups': self.subnet.groups
+                                      }]
             )
             self.connection.client.create_tags(Resources=[r['Instances'][0]['InstanceId']], Tags=[{
                                                 'Key': 'Name',
