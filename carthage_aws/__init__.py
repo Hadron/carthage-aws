@@ -18,8 +18,10 @@ class AwsConfig(ConfigSchema, prefix = "aws"):
     region: ConfigString
 
     #AWS VPC name
-    vpc: ConfigString
+    vpc_name: ConfigString
 
+    #AWS VPC ID
+    vpc_id: ConfigString
 
 @inject(injector=Injector)
 def enable_new_aws_connection(injector):

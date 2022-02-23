@@ -48,3 +48,33 @@ class AwsConnection(AwsManaged):
         self.keys = []
         for key in self.client.describe_key_pairs()['KeyPairs']:
             self.keys.append(key['KeyName'])
+        self.vpcs = []
+        self.igs = []
+        self.subnets = []
+        self.inventory()
+
+    def inventory(self):
+        r = self.client.describe_vpcs()
+        for v in r['Vpcs']:
+            vpc = {'id': v['VpcId']}
+            if 'Tags' in v:
+                for t in v['Tags']:
+                    if t['Key'] == 'Name':
+                        vpc['name'] = t['Value']
+            else: vpc['name'] = ''
+            self.vpcs.append(vpc)
+
+        r = self.client.describe_internet_gateways()
+        for ig in r['InternetGateways']:
+            if len(ig['Attachments']) == 0:
+                continue
+            a = ig['Attachments'][0]
+            if a['State'] == 'attached' or a['State'] == 'available':
+                self.igs.append({'id': ig['InternetGatewayId'], 'vpc': a['VpcId']})
+
+        r = self.client.describe_subnets()
+        for s in r['Subnets']:
+            subnet = {'CidrBlock': s['CidrBlock'], 'id': s['SubnetId'], 'vpc': s['VpcId']}
+            self.subnets.append(subnet)
+
+        
