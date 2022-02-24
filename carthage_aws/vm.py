@@ -27,7 +27,6 @@ class AwsVm(Machine, AwsManaged):
         super().__init__(connection=connection, injector=injector, network=network, *args, **kwargs)
         self.running = False
         self.closed = False
-        self.vm_running = self.machine_running
         self._operation_lock = asyncio.Lock()
         self.key = self.model.key
         self.imageid = self.model.imageid
@@ -36,36 +35,60 @@ class AwsVm(Machine, AwsManaged):
         self.subnet = None
 
     @setup_task('construct')
-    async def construct(self):
-        try:
-            self.subnet = self.injector(AwsSubnet)
-            self.subnet.do_create()
-            r = self.connection.client.run_instances(ImageId=self.imageid,
-                                      MinCount=1,
-                                      MaxCount=1,
-                                      InstanceType=self.size,
-                                      KeyName=self.key,
-                                      NetworkInterfaces=[{
-                                          'DeviceIndex': 0,
-                                          'SubnetId': self.subnet.id,
-                                          'AssociatePublicIpAddress': True,
-                                          'Groups': self.subnet.groups
-                                      }]
-            )
-            self.connection.client.create_tags(Resources=[r['Instances'][0]['InstanceId']], Tags=[{
-                                                'Key': 'Name',
-                                                'Value': self.name
-                                                }])
-            self.running = True
-        except ClientError as e:
-            logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
-        
+    async def start_machine(self):
+        async with self._operation_lock:
+            self.vpc = self.connection.run_vpc
+            logger.info(f'Starting {self.name} VM')
+            found_vm = []
+            if self.vpc != None:
+                found_vm = [vm for vm in self.connection.vms if vm['vpc'] == self.vpc['id'] and vm['name'] == self.name]
 
-    async def stop_vm(self):
-        pass
+            if len(found_vm) == 0:
+                try:
+                    self.subnet = self.injector(AwsSubnet)
+                    self.subnet.do_create()
+                    self.vpc = self.subnet.vpc
+                    r = self.connection.client.run_instances(ImageId=self.imageid,
+                                            MinCount=1,
+                                            MaxCount=1,
+                                            InstanceType=self.size,
+                                            KeyName=self.key,
+                                            NetworkInterfaces=[{
+                                                'DeviceIndex': 0,
+                                                'SubnetId': self.subnet.id,
+                                                'AssociatePublicIpAddress': True,
+                                                'Groups': [ self.vpc.groups[0]['GroupId'] ]
+                                            }]
+                    )
+                    self.connection.client.create_tags(Resources=[r['Instances'][0]['InstanceId']], Tags=[{
+                                                        'Key': 'Name',
+                                                        'Value': self.name
+                                                        }])
+                    self.id = r['Instances'][0]['InstanceId']
+                    self.running = True
+                except ClientError as e:
+                    logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
+            else:
+                logger.info(f"Skipping creating existing VM {self.name}")
+                self.id = found_vm[0]['id']
+            return True
 
-    start_machine = construct
-    stop_machine = stop_vm
+    async def stop_machine(self):
+        async with self._operation_lock:
+            if not self.running: return
+            logger.info(f'Terminating {self.name} VM')
+            try:
+                r = self.connection.client.terminate_instances(InstanceIds=[self.id])
+
+                # Update inventory's list of VMs
+                self.connection.inventory()
+
+            except ClientError as e:
+                logger.error(f'Could not terminate AWS VM {self.model.name} because {e}.')
+
+            return True
+
+    
 
     @property
     def stamp_path(self):

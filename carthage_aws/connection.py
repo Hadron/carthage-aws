@@ -51,6 +51,9 @@ class AwsConnection(AwsManaged):
         self.vpcs = []
         self.igs = []
         self.subnets = []
+        self.groups = []
+        self.vms = []
+        self.run_vpc = None
         self.inventory()
 
     def inventory(self):
@@ -63,6 +66,12 @@ class AwsConnection(AwsManaged):
                         vpc['name'] = t['Value']
             else: vpc['name'] = ''
             self.vpcs.append(vpc)
+            if (self.config.vpc_id != None or self.config.vpc_id != '') and vpc['id'] == self.config.vpc_id:
+                self.run_vpc = vpc
+            elif (self.config.vpc_id == None or self.config.vpc_id == '') and 'Tags' in v:
+                for t in v['Tags']:
+                    if t['Key'] == 'Name' and t['Value'] == self.config.vpc_name:
+                        self.run_vpc = vpc
 
         r = self.client.describe_internet_gateways()
         for ig in r['InternetGateways']:
@@ -72,9 +81,31 @@ class AwsConnection(AwsManaged):
             if a['State'] == 'attached' or a['State'] == 'available':
                 self.igs.append({'id': ig['InternetGatewayId'], 'vpc': a['VpcId']})
 
+        r = self.client.describe_security_groups()
+        for g in r['SecurityGroups']:
+            self.groups.append(g)
+
         r = self.client.describe_subnets()
         for s in r['Subnets']:
             subnet = {'CidrBlock': s['CidrBlock'], 'id': s['SubnetId'], 'vpc': s['VpcId']}
             self.subnets.append(subnet)
+
+        r = self.client.describe_instances()
+        for res in r['Reservations']:
+            for vm in res['Instances']:
+                if vm['State']['Name'] != 'terminated':
+                    v = {'id': vm['InstanceId'], 'vpc': vm['VpcId'], 'ip': vm['PublicIpAddress']}
+                    v['name'] = ''
+                    # Amazon y u do dis
+                    if 'Tags' in vm:
+                        for t in vm['Tags']:
+                            if t['Key'] == 'Name':
+                                v['name'] = t['Value']
+                self.vms.append(v)
+    
+    def set_running_vpc(self, vpc):
+        for v in self.vpcs:
+            if v['id'] == vpc:
+                self.run_vpc = v
 
         

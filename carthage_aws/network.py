@@ -31,6 +31,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
             self.id = ''
         else: self.id = config.aws.vpc_id
         self.groups = []
+        self.vms = []
 
     @setup_task('construct')
     def do_create(self):
@@ -66,20 +67,34 @@ class AwsVirtualPrivateCloud(AwsManaged):
                 routetable = self.connection.client.create_route_table(VpcId=self.id)
                 self.routetable = routetable['RouteTable']['RouteTableId']
                 self.connection.client.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=self.ig, RouteTableId=self.routetable)
-                sg = self.connection.client.create_security_group(GroupName='demo', VpcId=self.id, Description='Demo')
-                self.groups.append(sg['GroupId'])
-            self.connection.client.authorize_security_group_ingress(GroupId=self.groups[0], IpPermissions=[
-                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
-            ])
-            self.connection.client.authorize_security_group_egress(GroupId=self.groups[0], IpPermissions=[
-                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
-            ])
+                sg = self.connection.client.create_security_group(GroupName=f'{self.name} open', VpcId=self.id, Description=f'{self.name} open')
+                self.groups.append(sg)
+            
+                self.connection.client.authorize_security_group_ingress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
+                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
+                ])
+                self.connection.client.authorize_security_group_egress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
+                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
+                ])
+            
+            self.vms = []
+            for vm in self.connection.vms:
+                if vm['vpc'] == self.id:
+                    self.vms.append(vm)
+
+            for sg in self.connection.groups:
+                if sg['VpcId'] == self.id:
+                    self.groups.append(sg)
+            
+            # Set this as the VPC for this run
+            self.connection.set_running_vpc(self.id)
+
             self.create_stamp(self.name, '')
         except ClientError as e:
             logger.error(f'Could not create AWS VPC {self.name} due to {e}.')
@@ -125,6 +140,7 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
                 )
                 self.id = r['Subnet']['SubnetId']
                 self.connection.client.associate_route_table(RouteTableId=self.vpc.routetable, SubnetId=self.id)
+
 
             self.create_stamp(self.name, '')
             
