@@ -33,17 +33,22 @@ class AwsVm(Machine, AwsManaged):
         self.size = self.model.size
         self.running = False
         self.subnet = None
+        self.id = None
+        self.vpc = self.connection.run_vpc
+        found_vm = []
+        if self.vpc != None:
+            found_vm = [vm for vm in self.connection.vms if vm['vpc'] == self.vpc['id'] and vm['name'] == self.name]
+        if len(found_vm) > 0:
+            self.id = found_vm[0]['id']
+            self.running = True
 
     @setup_task('construct')
     async def start_machine(self):
         async with self._operation_lock:
             self.vpc = self.connection.run_vpc
             logger.info(f'Starting {self.name} VM')
-            found_vm = []
-            if self.vpc != None:
-                found_vm = [vm for vm in self.connection.vms if vm['vpc'] == self.vpc['id'] and vm['name'] == self.name]
 
-            if len(found_vm) == 0:
+            if self.id == None:
                 try:
                     self.subnet = self.injector(AwsSubnet)
                     self.subnet.do_create()
@@ -65,13 +70,12 @@ class AwsVm(Machine, AwsManaged):
                                                         'Value': self.name
                                                         }])
                     self.id = r['Instances'][0]['InstanceId']
-                    self.running = True
                 except ClientError as e:
                     logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
             else:
                 logger.info(f"Skipping creating existing VM {self.name}")
-                self.id = found_vm[0]['id']
-            return True
+            self.running = True
+            return self.running
 
     async def stop_machine(self):
         async with self._operation_lock:
