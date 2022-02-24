@@ -7,7 +7,6 @@ from carthage.dependency_injection import *
 from carthage.vm import vm_image
 from carthage.config import ConfigLayout
 from carthage.machine import Machine
-from carthage.image import SetupTaskMixin
 
 import boto3
 from botocore.exceptions import ClientError
@@ -18,13 +17,11 @@ from .network import AwsVirtualPrivateCloud, AwsSubnet
 __all__ = ['AwsVm']
 
 
-@inject_autokwargs(connection=AwsConnection, injector=Injector, network=InjectionKey(NetworkModel), config_layout=ConfigLayout)
+@inject_autokwargs(connection=AwsConnection,  network=InjectionKey(NetworkModel), )
 class AwsVm(Machine, AwsManaged):
 
-    def __init__(self, connection, injector, network, *args, **kwargs):
-        self.connection = connection
-        self.network = network
-        super().__init__(connection=connection, injector=injector, network=network, *args, **kwargs)
+    def __init__(self, name, **kwargs):
+        super().__init__(name=name, **kwargs)
         self.running = False
         self.closed = False
         self.vm_running = self.machine_running
@@ -32,7 +29,6 @@ class AwsVm(Machine, AwsManaged):
         self.key = self.model.key
         self.imageid = self.model.imageid
         self.size = self.model.size
-        self.running = False
         self.subnet = None
 
     @setup_task('construct')
@@ -68,7 +64,5 @@ class AwsVm(Machine, AwsManaged):
     stop_machine = stop_vm
 
     @property
-    def stamp_path(self):
-        return Path(self.config_layout.state_dir)/'aws'/self.name
 
-
+    stamp_descriptor = "vm"
