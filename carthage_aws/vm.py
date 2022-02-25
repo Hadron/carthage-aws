@@ -7,7 +7,6 @@ from carthage.dependency_injection import *
 from carthage.vm import vm_image
 from carthage.config import ConfigLayout
 from carthage.machine import Machine
-from carthage.image import SetupTaskMixin
 
 import boto3
 from botocore.exceptions import ClientError
