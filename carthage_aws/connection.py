@@ -23,6 +23,8 @@ __all__ = ['AwsConnection', 'AwsManaged']
 
 resource_factory_methods = dict(
     instance='Instance',
+    vpc='Vpc',
+    subnet='Subnet',
 )
 
 async def run_in_executor(func, *args):

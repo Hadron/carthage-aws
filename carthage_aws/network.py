@@ -16,6 +16,12 @@ __all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet']
 class AwsVirtualPrivateCloud(AwsManaged):
 
     stamp_type = "vpc"
+    resource_type = 'vpc'
+
+    def find_from_id(self):
+        # for now fall back so groups get set
+        return None
+    
 
     def __init__(self,  **kwargs):
         super().__init__( **kwargs)
@@ -101,15 +107,17 @@ class AwsVirtualPrivateCloud(AwsManaged):
         pass
 
 
-@inject_autokwargs(connection = AwsConnection, injector = Injector, network=NetworkModel)
+@inject_autokwargs(connection = AwsConnection, injector = Injector, network=NetworkModel,
+                   vpc=InjectionKey(AwsVirtualPrivateCloud, _ready=True))
 class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
 
     stamp_type = "subnet"
+    resource_type = 'subnet'
     
     def __init__(self, connection, injector, network, *args, **kwargs):
         self.connection = connection
         self.injector = injector
-        self.vpc = self.injector(AwsVirtualPrivateCloud)
+
         self.network = network
         super().__init__(connection=connection, injector=injector, network=network, *args, **kwargs)
         self.groups = self.vpc.groups

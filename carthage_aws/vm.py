@@ -11,14 +11,15 @@ from carthage.machine import Machine
 import boto3
 from botocore.exceptions import ClientError
 
-from .connection import AwsConnection, AwsManaged
+from .connection import AwsConnection, AwsManaged, run_in_executor
 from .network import AwsVirtualPrivateCloud, AwsSubnet
 
 __all__ = ['AwsVm']
 
 
 
-@inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True),  network=InjectionKey(NetworkModel))
+@inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True),  network=InjectionKey(NetworkModel),
+                   subnet=InjectionKey(AwsSubnet, _ready=True))
 class AwsVm(AwsManaged, Machine):
 
     pass_name_to_super = True
@@ -33,7 +34,7 @@ class AwsVm(AwsManaged, Machine):
         self.key = self.model.key
         self.imageid = self.model.imageid
         self.size = self.model.size
-        self.subnet = None
+        #self.subnet = None
         self.id = None
         self.vpc = self.connection.run_vpc
         found_vm = []
@@ -47,8 +48,6 @@ class AwsVm(AwsManaged, Machine):
         self.vpc = self.connection.run_vpc
         logger.info(f'Starting {self.name} VM')
 
-        self.subnet = self.injector(AwsSubnet)
-        self.subnet.do_create()
         self.vpc = self.subnet.vpc
         try:
             r = self.connection.client.run_instances(
@@ -63,24 +62,14 @@ class AwsVm(AwsManaged, Machine):
                     'AssociatePublicIpAddress': True,
                     'Groups': [ self.vpc.groups[0]['GroupId'] ]
                 }],
-                TagSpecifications=self.resource_tags,
+                TagSpecifications=[self.resource_tags],
             )
             self.id = r['Instances'][0]['InstanceId']
         except ClientError as e:
             logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
 
-    async def stop_machine(self):
-        async with self._operation_lock:
-            if not self.running: return
-            logger.info(f'Terminating {self.name} VM')
-            try:
-                r = self.connection.client.terminate_instances(InstanceIds=[self.id])
 
-                # Update inventory's list of VMs
-                await self.connection.inventory()
 
-            except ClientError as e:
-                logger.error(f'Could not terminate AWS VM {self.model.name} because {e}.')
 
             return True
 
@@ -90,6 +79,38 @@ class AwsVm(AwsManaged, Machine):
         if self.mob:
             if self.mob.state['Name'] == 'terminated':
                 self.mob = None
+
+    async def start_machine(self):
+        async with self._operation_lock:
+            if self.running is True: return
+            await self.start_dependencies()
+            await super().start_machine()
+            if not self.mob:
+                await self.find_or_create()
+                await self.is_machine_running
+                if self.running: return
+                logger.info(f'Starting {self.name}')
+            await run_in_executor(self.mob.start)
+            self.running = True
+
+    async def stop_machine(self):
+        async with self._operation_lock:
+            if not self.running:
+                return
+            await run_in_executor(self.mob.stop)
+            self.running = False
+            awaitsuper().stop_machine()
+
+    async def is_machine_running(self):
+        if not self.mob: await self.find()
+        if not self.mob:
+            self.running = False
+            return False
+        await run_in_executor(self.mob.load)
+        self.running = self.mob.state['Name'] in ('pending', 'running')
+        return self.running
+    
+        
             
     
 
