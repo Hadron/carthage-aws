@@ -5,6 +5,7 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
+from pathlib import Path
 
 import asyncio
 import functools
@@ -27,7 +28,7 @@ class AwsManaged(AsyncInjectable, SetupTaskMixin):
 
 
     @memoproperty
-    def stamp_descriptor(self):
+    def stamp_type(self):
         raise NotImplementedError(type(self))
 
     @memoproperty

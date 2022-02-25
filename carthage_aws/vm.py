@@ -18,20 +18,17 @@ from .network import AwsVirtualPrivateCloud, AwsSubnet
 __all__ = ['AwsVm']
 
 
-@inject_autokwargs(connection=AwsConnection, injector=Injector, network=InjectionKey(NetworkModel), config_layout=ConfigLayout)
+@inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True),  network=InjectionKey(NetworkModel))
 class AwsVm(Machine, AwsManaged):
 
-    def __init__(self, connection, injector, network, *args, **kwargs):
-        self.connection = connection
-        self.network = network
-        super().__init__(connection=connection, injector=injector, network=network, *args, **kwargs)
+    def __init__(self, name, **kwargs):
+        super().__init__(name=name, **kwargs)
         self.running = False
         self.closed = False
         self._operation_lock = asyncio.Lock()
         self.key = self.model.key
         self.imageid = self.model.imageid
         self.size = self.model.size
-        self.running = False
         self.subnet = None
         self.id = None
         self.vpc = self.connection.run_vpc
@@ -94,8 +91,6 @@ class AwsVm(Machine, AwsManaged):
 
     
 
-    @property
-    def stamp_path(self):
-        return Path(self.config_layout.state_dir)/'aws'/self.name
 
-
+    stamp_type = 'vm'
+    

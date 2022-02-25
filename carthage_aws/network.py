@@ -12,16 +12,14 @@ from botocore.exceptions import ClientError
 __all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet']
 
 
-@inject_autokwargs(connection = AwsConnection, injector = Injector, config = ConfigLayout, network=NetworkModel)
+@inject_autokwargs(connection = InjectionKey(AwsConnection, _ready=True), network=NetworkModel)
 class AwsVirtualPrivateCloud(AwsManaged):
 
     stamp_type = "vpc"
 
-    def __init__(self, connection, injector, config, network, *args, **kwargs):
-        self.injector = injector
-        self.connection = connection
-        self.network = network
-        super().__init__(connection=connection, injector=injector, config=config, network=network, *args, **kwargs)
+    def __init__(self,  **kwargs):
+        super().__init__( **kwargs)
+        config = self.config_layout
         if config.aws.vpc_name == None and config.aws.vpc_id == None:
             raise Error("You must specify either an AWS VPC ID or VPC name.")
         if config.aws.vpc_name == None:
@@ -39,7 +37,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
             # Only build a VPC if it doesn't already exist
             for v in self.connection.vpcs:
                 # Prefer ID match
-                if self.config.aws.vpc_id == v['id']:
+                if self.config_layout.aws.vpc_id == v['id']:
                     self.id = v['id']
                     break
                 if self.name == v['name']:
