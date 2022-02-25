@@ -17,10 +17,15 @@ from .network import AwsVirtualPrivateCloud, AwsSubnet
 __all__ = ['AwsVm']
 
 
+
 @inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True),  network=InjectionKey(NetworkModel))
-class AwsVm(Machine, AwsManaged):
+class AwsVm(AwsManaged, Machine):
+
+    pass_name_to_super = True
 
     def __init__(self, name, **kwargs):
+        self.name = ""
+        print(super().__init__)
         super().__init__(name=name, **kwargs)
         self.running = False
         self.closed = False
@@ -38,40 +43,31 @@ class AwsVm(Machine, AwsManaged):
             self.id = found_vm[0]['id']
             self.running = True
 
-    @setup_task('construct')
-    async def start_machine(self):
-        async with self._operation_lock:
-            self.vpc = self.connection.run_vpc
-            logger.info(f'Starting {self.name} VM')
+    def do_create(self):
+        self.vpc = self.connection.run_vpc
+        logger.info(f'Starting {self.name} VM')
 
-            if self.id == None:
-                try:
-                    self.subnet = self.injector(AwsSubnet)
-                    self.subnet.do_create()
-                    self.vpc = self.subnet.vpc
-                    r = self.connection.client.run_instances(ImageId=self.imageid,
-                                            MinCount=1,
-                                            MaxCount=1,
-                                            InstanceType=self.size,
-                                            KeyName=self.key,
-                                            NetworkInterfaces=[{
-                                                'DeviceIndex': 0,
+        self.subnet = self.injector(AwsSubnet)
+        self.subnet.do_create()
+        self.vpc = self.subnet.vpc
+        try:
+            r = self.connection.client.run_instances(
+                ImageId=self.imageid,
+                MinCount=1,
+                MaxCount=1,
+                InstanceType=self.size,
+                KeyName=self.key,
+                NetworkInterfaces=[{
+                    'DeviceIndex': 0,
                                                 'SubnetId': self.subnet.id,
-                                                'AssociatePublicIpAddress': True,
-                                                'Groups': [ self.vpc.groups[0]['GroupId'] ]
-                                            }]
-                    )
-                    self.connection.client.create_tags(Resources=[r['Instances'][0]['InstanceId']], Tags=[{
-                                                        'Key': 'Name',
-                                                        'Value': self.name
-                                                        }])
-                    self.id = r['Instances'][0]['InstanceId']
-                except ClientError as e:
-                    logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
-            else:
-                logger.info(f"Skipping creating existing VM {self.name}")
-            self.running = True
-            return self.running
+                    'AssociatePublicIpAddress': True,
+                    'Groups': [ self.vpc.groups[0]['GroupId'] ]
+                }],
+                TagSpecifications=self.resource_tags,
+            )
+            self.id = r['Instances'][0]['InstanceId']
+        except ClientError as e:
+            logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
 
     async def stop_machine(self):
         async with self._operation_lock:
@@ -81,15 +77,24 @@ class AwsVm(Machine, AwsManaged):
                 r = self.connection.client.terminate_instances(InstanceIds=[self.id])
 
                 # Update inventory's list of VMs
-                self.connection.inventory()
+                await self.connection.inventory()
 
             except ClientError as e:
                 logger.error(f'Could not terminate AWS VM {self.model.name} because {e}.')
 
             return True
 
+    def find_from_id(self):
+        # terminated instances do not count
+        super().find_from_id()
+        if self.mob:
+            if self.mob.state['Name'] == 'terminated':
+                self.mob = None
+            
     
 
 
     stamp_type = 'vm'
+
+    resource_type = 'instance'
     

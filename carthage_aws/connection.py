@@ -21,25 +21,15 @@ from botocore.exceptions import ClientError
 
 __all__ = ['AwsConnection', 'AwsManaged']
 
+resource_factory_methods = dict(
+    instance='Instance',
+)
 
-
+async def run_in_executor(func, *args):
+    return await asyncio.get_event_loop().run_in_executor(None, func, *args)
+    
 @inject_autokwargs(config_layout=ConfigLayout)
-class AwsManaged(AsyncInjectable, SetupTaskMixin):
-
-
-    @memoproperty
-    def stamp_type(self):
-        raise NotImplementedError(type(self))
-
-    @memoproperty
-    def stamp_path(self):
-        p = Path(self.config_layout.state_dir)
-        p = p.joinpath("aws_stamps", self.stamp_type+".stamps")
-        os.makedirs(p, exist_ok=True)
-        return p
-
-
-class AwsConnection(AwsManaged):
+class AwsConnection(AsyncInjectable):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -47,6 +37,8 @@ class AwsConnection(AwsManaged):
         self.connection = None
 
 
+    async def inventory(self):
+        await run_in_executor(self._inventory)
     def _setup(self):
         self.connection = boto3.Session(
             aws_access_key_id=self.config.access_key_id,
@@ -63,9 +55,22 @@ class AwsConnection(AwsManaged):
         self.groups = []
         self.vms = []
         self.run_vpc = None
-        self.inventory()
+        self._inventory()
 
-    def inventory(self):
+    def _inventory(self):
+        # Executor context
+        self.names_by_resource_type = {}
+        for rt in resource_factory_methods:
+            self.names_by_resource_type[rt] = {}
+            nbrt = self.names_by_resource_type
+        r = self.client.describe_tags(Filters=[dict(Name='key', Values=['Name'])])
+        for resource in r['Tags']:
+            # This setdefault should be unnecessary but is defensive
+            # in case someone has tagged a resource we do not normally
+            # manage with a Name.
+            nbrt.setdefault(resource['ResourceType'], {})
+            nbrt[resource['ResourceType']][resource['Value']] = resource
+            
         r = self.client.describe_vpcs()
         for v in r['Vpcs']:
             vpc = {'id': v['VpcId']}
@@ -99,18 +104,6 @@ class AwsConnection(AwsManaged):
             subnet = {'CidrBlock': s['CidrBlock'], 'id': s['SubnetId'], 'vpc': s['VpcId']}
             self.subnets.append(subnet)
 
-        r = self.client.describe_instances()
-        for res in r['Reservations']:
-            for vm in res['Instances']:
-                if vm['State']['Name'] != 'terminated':
-                    v = {'id': vm['InstanceId'], 'vpc': vm['VpcId'], 'ip': vm['PublicIpAddress']}
-                    v['name'] = ''
-                    # Amazon y u do dis
-                    if 'Tags' in vm:
-                        for t in vm['Tags']:
-                            if t['Key'] == 'Name':
-                                v['name'] = t['Value']
-                self.vms.append(v)
     
     def set_running_vpc(self, vpc):
         for v in self.vpcs:
@@ -118,5 +111,100 @@ class AwsConnection(AwsManaged):
                 self.run_vpc = v
 
     async def async_ready(self):
-        await asyncio.get_event_loop().run_in_executor(None, self._setup)
+        await run_in_executor(self._setup)
         return await super().async_ready()
+
+
+
+@inject_autokwargs(config_layout=ConfigLayout,
+                   connection=InjectionKey(AwsConnection, _ready=True),
+                   )
+class AwsManaged(SetupTaskMixin, AsyncInjectable):
+
+    pass_name_to_super = False # True for machines
+
+    def __init__(self, *, name=None, id=None, **kwargs):
+        if name and self.pass_name_to_super: kwargs['name'] = name
+        self.name = name or ""
+        self.id = id
+        super().__init__(**kwargs)
+        self.mob = None
+        
+
+    @memoproperty
+    def stamp_type(self):
+        raise NotImplementedError(type(self))
+
+    @property
+    def resource_type(self):
+        '''The resource type associated with tags'''
+        raise NotImplementedError
+
+    @memoproperty
+    def service_resource(self):
+        # override for non-ec2
+        return self.connection.connection.resource('ec2', region_name=self.connection.region)
+
+    @property
+    def resource_tags(self):
+        tags = []
+        if self.name:
+            tags.append(dict(Key="Name", Value=self.name))
+        return dict(ResourceType=self.resource_type,
+                    Tags=tags)
+    
+    def find_from_id(self):
+        #called in executor context; create a mob from id
+        assert self.id
+        resource_factory = getattr(self.service_resource, resource_factory_methods[self.resource_type])
+        self.mob = resource_factory(self.id)
+        self.mob.load()
+        return self.mob
+
+
+    async def find(self):
+        '''Find ourself from a name or id
+'''
+        if self.id:
+            return await run_in_executor(self.find_from_id)
+        elif self.name:
+            resource_type = self.resource_type
+            names = self.connection.names_by_resource_type[resource_type]
+            if self.name in names:
+                self.id = names[self.name]['ResourceId']
+                return await run_in_executor(self.find_from_id)
+        return
+
+    @setup_task("construct")
+    async def find_or_create(self):
+        if self.mob: return
+        # If we are called directly, rather than through setup_tasks,
+        # then our check_completed will not have run, so we should
+        # explicitly try find, because double creating is bad.
+        await self.find()
+        if self.mob: return
+        if not self.name: raise RuntimeError('You must specify a name for creation')
+        await run_in_executor(self.do_create)
+        await self.find()
+        return self.mob
+
+    @find_or_create.check_completed()
+    async def find_or_create(self):
+        await self.find()
+        if self.mob: return True
+        return False
+    
+    def do_create(self):
+        # run in executor context
+        raise NotImplementedError
+
+
+
+    @memoproperty
+    def stamp_path(self):
+        p = Path(self.config_layout.state_dir)
+        p = p.joinpath("aws_stamps", self.stamp_type+".stamps")
+        os.makedirs(p, exist_ok=True)
+        return p
+
+
