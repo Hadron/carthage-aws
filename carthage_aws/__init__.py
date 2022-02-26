@@ -6,6 +6,7 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
 
+from ipaddress import IPv4Network
 import carthage
 from carthage.dependency_injection import *
 from carthage.config import ConfigSchema
@@ -30,6 +31,9 @@ class AwsConfig(ConfigSchema, prefix = "aws"):
 
     #: AWS VPC ID
     vpc_id: ConfigString
+    #: CIDR block to allocate to created VPC
+    vpc_cidr: IPv4Network = IPv4Network('192.168.0.0/16')
+    
 
 @inject(injector=Injector)
 def enable_new_aws_connection(injector):
@@ -38,7 +42,7 @@ def enable_new_aws_connection(injector):
 
 @inject(injector=Injector)
 def carthage_plugin(injector):
-    injector.add_provider(AwsVirtualPrivateCloud, allow_multiple=True)
+    injector.add_provider(AwsVirtualPrivateCloud)
     injector.add_provider(AwsSubnet, allow_multiple = True)
     injector(enable_new_aws_connection)
     

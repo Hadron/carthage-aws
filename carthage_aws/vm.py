@@ -14,6 +14,7 @@ from carthage.dependency_injection import *
 from carthage.vm import vm_image
 from carthage.config import ConfigLayout
 from carthage.machine import Machine
+from carthage.network import NetworkConfig
 
 import boto3
 from botocore.exceptions import ClientError
@@ -25,15 +26,14 @@ __all__ = ['AwsVm']
 
 
 
-@inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True),  network=InjectionKey(NetworkModel),
-                   subnet=InjectionKey(AwsSubnet, _ready=True))
+@inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True),
+                   )
 class AwsVm(AwsManaged, Machine):
 
     pass_name_to_super = True
 
     def __init__(self, name, **kwargs):
         self.name = ""
-        print(super().__init__)
         super().__init__(name=name, **kwargs)
         self.running = False
         self.closed = False
@@ -53,14 +53,35 @@ class AwsVm(AwsManaged, Machine):
 
     def _find_ip_address(self):
         self.mob.load()
-        self.ip_address = self.mob.public_ip_address
+        if self.mob.public_ip_address:         self.ip_address = self.mob.public_ip_address
 
+    async def pre_create_hook(self):
+        await self.resolve_networking()
+        futures = []
+        loop = asyncio.get_event_loop()
+        if not self.network_links:
+            raise RuntimeError('AWS instances require a network link')
+        for l in self.network_links.values():
+            futures.append(loop.create_task(l.instantiate(AwsSubnet)))
+            await asyncio.gather(*futures)
+            
+            
     def do_create(self):
+        network_interfaces = []
+        device_index = 0
+        for l in self.network_links.values():
+            network_interfaces.append(
+                {
+                    'DeviceIndex': device_index,
+                    'SubnetId': l.net_instance.id,
+                    'AssociatePublicIpAddress': True,
+                    'Groups': [ l.net_instance.vpc.groups[0]['GroupId'] ]
+                })
+            
 
-        self.vpc = self.connection.run_vpc
+
         logger.info(f'Starting {self.name} VM')
 
-        self.vpc = self.subnet.vpc
         try:
             r = self.connection.client.run_instances(
                 ImageId=self.imageid,
@@ -68,12 +89,7 @@ class AwsVm(AwsManaged, Machine):
                 MaxCount=1,
                 InstanceType=self.size,
                 KeyName=self.key,
-                NetworkInterfaces=[{
-                    'DeviceIndex': 0,
-                                                'SubnetId': self.subnet.id,
-                    'AssociatePublicIpAddress': True,
-                    'Groups': [ self.vpc.groups[0]['GroupId'] ]
-                }],
+                NetworkInterfaces=network_interfaces,
                 TagSpecifications=[self.resource_tags],
             )
             self.id = r['Instances'][0]['InstanceId']
@@ -84,14 +100,15 @@ class AwsVm(AwsManaged, Machine):
     def find_from_id(self):
         # terminated instances do not count
         super().find_from_id()
-        if self.__class__.ip_address is Machine.ip_address:
-            try:
-                self.ip_address
-            except NotImplementedError:
-                self._find_ip_address()
         if self.mob:
             if self.mob.state['Name'] == 'terminated':
                 self.mob = None
+                return
+            if self.__class__.ip_address is Machine.ip_address:
+                try:
+                    self.ip_address
+                except NotImplementedError:
+                    self._find_ip_address()
 
     async def start_machine(self):
         async with self._operation_lock:
@@ -121,6 +138,11 @@ class AwsVm(AwsManaged, Machine):
             return False
         await run_in_executor(self.mob.load)
         self.running = self.mob.state['Name'] in ('pending', 'running')
+        if self.__class__.ip_address is Machine.ip_address:
+            try:
+                self.ip_address
+            except NotImplementedError:
+                self._find_ip_address()
         return self.running
 
     stamp_type = 'vm'
