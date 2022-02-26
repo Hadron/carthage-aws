@@ -51,7 +51,12 @@ class AwsVm(AwsManaged, Machine):
             self.id = found_vm[0]['id']
             self.running = True
 
+    def _find_ip_address(self):
+        self.mob.load()
+        self.ip_address = self.mob.public_ip_address
+
     def do_create(self):
+
         self.vpc = self.connection.run_vpc
         logger.info(f'Starting {self.name} VM')
 
@@ -74,15 +79,16 @@ class AwsVm(AwsManaged, Machine):
             self.id = r['Instances'][0]['InstanceId']
         except ClientError as e:
             logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
-
-
-
-
             return True
 
     def find_from_id(self):
         # terminated instances do not count
         super().find_from_id()
+        if self.__class__.ip_address is Machine.ip_address:
+            try:
+                self.ip_address
+            except NotImplementedError:
+                self._find_ip_address()
         if self.mob:
             if self.mob.state['Name'] == 'terminated':
                 self.mob = None
@@ -116,13 +122,7 @@ class AwsVm(AwsManaged, Machine):
         await run_in_executor(self.mob.load)
         self.running = self.mob.state['Name'] in ('pending', 'running')
         return self.running
-    
-        
-            
-    
-
 
     stamp_type = 'vm'
-
     resource_type = 'instance'
     
