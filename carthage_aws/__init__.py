@@ -14,6 +14,7 @@ from carthage.config.types import ConfigString
 
 from .connection import AwsConnection
 from .network import AwsVirtualPrivateCloud, AwsSubnet
+from .dns import AwsHostedZone
 
 
 class AwsConfig(ConfigSchema, prefix = "aws"):
