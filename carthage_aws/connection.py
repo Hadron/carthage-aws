@@ -161,7 +161,14 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         assert self.id
         resource_factory = getattr(self.service_resource, resource_factory_methods[self.resource_type])
         self.mob = resource_factory(self.id)
-        self.mob.load()
+        while True:
+            try:
+                self.mob.load()
+                break
+            except:
+                import traceback, time
+                traceback.print_exc()
+                time.sleep(4)
         return self.mob
 
 
