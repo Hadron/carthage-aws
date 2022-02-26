@@ -5,7 +5,7 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
-import asyncio
+import asyncio, time
 from pathlib import Path
 
 from carthage import *
@@ -41,19 +41,16 @@ class AwsVm(AwsManaged, Machine):
         self.key = self.model.key
         self.imageid = self.model.imageid
         self.size = self.model.size
-        #self.subnet = None
         self.id = None
         self.vpc = self.connection.run_vpc
-        found_vm = []
-        if self.vpc != None:
-            found_vm = [vm for vm in self.connection.vms if vm['vpc'] == self.vpc['id'] and vm['name'] == self.name]
-        if len(found_vm) > 0:
-            self.id = found_vm[0]['id']
-            self.running = True
 
     def _find_ip_address(self):
         self.mob.load()
-        if self.mob.public_ip_address:         self.ip_address = self.mob.public_ip_address
+        while True:
+            if self.mob.public_ip_address:
+                self.ip_address = self.mob.public_ip_address
+                break
+            time.sleep(1)
 
     async def pre_create_hook(self):
         await self.resolve_networking()
