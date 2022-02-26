@@ -11,7 +11,7 @@ from carthage.network import TechnologySpecificNetwork, this_network
 from carthage.config import ConfigLayout
 from carthage.modeling import NetworkModel
 
-from .connection import AwsConnection, AwsManaged
+from .connection import AwsConnection, AwsManaged, run_in_executor
 
 import boto3
 from botocore.exceptions import ClientError
@@ -19,15 +19,12 @@ from botocore.exceptions import ClientError
 __all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet']
 
 
-@inject_autokwargs(connection = InjectionKey(AwsConnection, _ready=True), network=NetworkModel)
+@inject_autokwargs()
 class AwsVirtualPrivateCloud(AwsManaged):
 
     stamp_type = "vpc"
     resource_type = 'vpc'
 
-    def find_from_id(self):
-        # for now fall back so groups get set
-        return None
     
 
     def __init__(self,  **kwargs):
@@ -44,27 +41,15 @@ class AwsVirtualPrivateCloud(AwsManaged):
         self.groups = []
         self.vms = []
 
-    @setup_task('construct')
+
     def do_create(self):
         try:
-            # Only build a VPC if it doesn't already exist
-            for v in self.connection.vpcs:
-                # Prefer ID match
-                if self.config_layout.aws.vpc_id == v['id']:
-                    self.id = v['id']
-                    break
-                if self.name == v['name']:
-                    self.id = v['id']
-            if self.id == '':
-                r = self.connection.client.create_vpc(InstanceTenancy='default', CidrBlock=str(self.network.v4_config.network), 
-                                                                                    TagSpecifications=[{
-                                                                                    'ResourceType': 'vpc',
-                                                                                        'Tags': [{
-                                                                                            'Key': 'Name',
-                                                                                            'Value': self.name
-                                                                                        }]
-                                                                                    }])
-                self.id = r['Vpc']['VpcId']
+            r = self.connection.client.create_vpc(
+                    InstanceTenancy='default',
+                                                      CidrBlock=str(self.config_layout.aws.vpc_cidr), 
+                    TagSpecifications=[self.resource_tags])
+            self.id = r['Vpc']['VpcId']
+
             
             make_ig = True
             for ig in self.connection.igs:
@@ -75,9 +60,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
                 ig = self.connection.client.create_internet_gateway()
                 self.ig = ig['InternetGateway']['InternetGatewayId']
                 self.connection.client.attach_internet_gateway(InternetGatewayId=self.ig, VpcId=self.id)
-                routetable = self.connection.client.create_route_table(VpcId=self.id)
-                self.routetable = routetable['RouteTable']['RouteTableId']
-                self.connection.client.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=self.ig, RouteTableId=self.routetable)
+                self.connection.client.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=self.ig, RouteTableId=self.main_route_table_id)
                 sg = self.connection.client.create_security_group(GroupName=f'{self.name} open', VpcId=self.id, Description=f'{self.name} open')
                 self.groups.append(sg)
             
@@ -94,68 +77,73 @@ class AwsVirtualPrivateCloud(AwsManaged):
                     {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
                 ])
             
-            self.vms = []
-            for vm in self.connection.vms:
-                if vm['vpc'] == self.id:
-                    self.vms.append(vm)
 
-            for sg in self.connection.groups:
-                if sg['VpcId'] == self.id:
-                    self.groups.append(sg)
-            
-            # Set this as the VPC for this run
-            self.connection.set_running_vpc(self.id)
 
-            self.create_stamp(self.name, '')
         except ClientError as e:
             logger.error(f'Could not create AWS VPC {self.name} due to {e}.')
 
+    @memoproperty
+    def main_route_table_id(self):
+        r = self.connection.client.describe_route_tables(
+            Filters=[
+                dict(Name='vpc-id', Values=[self.id]),
+                dict(Name='association.main',
+                     Values=['true'])])
+        return r['RouteTables'][0]['RouteTableId']
+    
+    async def post_find_hook(self):
+        groups =self.connection.client.describe_security_groups(Filters=[
+            dict(Name='vpc-id', Values=[self.id])])
+
+        self.groups = groups['SecurityGroups']
+        
+        
     def delete(self):
-        pass
+        for sn in self.mob.subnets.all():
+            sn.delete()
+        for g in self.mob.security_groups.all():
+            try: g.delete()
+            except: pass
+        for gw in self.mob.internet_gateways.all():
+            gw.detach_from_vpc(VpcId=self.id)
+            gw.delete()
+        for rt in self.mob.route_tables.all():
+            try: rt.delete()
+            except: pass
+        self.mob.delete()
 
 
-@inject_autokwargs(connection = AwsConnection, injector = Injector, network=NetworkModel,
+@inject_autokwargs(connection = InjectionKey(AwsConnection, _ready=True),
+                   network=this_network,
                    vpc=InjectionKey(AwsVirtualPrivateCloud, _ready=True))
 class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
 
     stamp_type = "subnet"
     resource_type = 'subnet'
     
-    def __init__(self, connection, injector, network, *args, **kwargs):
-        self.connection = connection
-        self.injector = injector
-
-        self.network = network
-        super().__init__(connection=connection, injector=injector, network=network, *args, **kwargs)
+    def __init__(self,  **kwargs):
+        super().__init__( **kwargs)
         self.groups = self.vpc.groups
         self.name = self.network.name
         
 
-    @setup_task('construct')
-    def do_create(self):
-        try:
-            self.vpc.do_create()
-            self.id = ''
-            for s in self.connection.subnets:
+
+    async def find(self):
+        if self.id: return await run_in_executor(self.find_from_id)
+        for s in self.connection.subnets:
                 if s['vpc'] == self.vpc.id and s['CidrBlock'] == str(self.network.v4_config.network):
                     self.id = s['id']
-                    break
-            if self.id == '':
-                r = self.connection.client.create_subnet(VpcId=self.vpc.id,
-                                                CidrBlock=str(self.network.v4_config.network),
-                                                TagSpecifications=[{
-                                                'ResourceType': 'subnet',
-                                                'Tags': [{
-                                                    'Key': 'Name',
-                                                    'Value': self.name
-                                                }]
-                    }]
-                )
-                self.id = r['Subnet']['SubnetId']
-                self.connection.client.associate_route_table(RouteTableId=self.vpc.routetable, SubnetId=self.id)
+                    return await run_in_executor(self.find_from_id)
 
 
-            self.create_stamp(self.name, '')
+    def do_create(self):
+        try:
+            r = self.connection.client.create_subnet(VpcId=self.vpc.id,
+                                                     CidrBlock=str(self.network.v4_config.network),
+                                                     TagSpecifications=[self.resource_tags]
+                                                     )
+            self.id = r['Subnet']['SubnetId']
+            # No need to associate subnet with main route table
             
         except ClientError as e:
             logger.error(f'Could not create AWS subnet {self.name} due to {e}.')

@@ -55,7 +55,6 @@ class AwsConnection(AsyncInjectable):
         self.igs = []
         self.subnets = []
         self.groups = []
-        self.vms = []
         self.run_vpc = None
         self._inventory()
 
@@ -70,8 +69,10 @@ class AwsConnection(AsyncInjectable):
             # This setdefault should be unnecessary but is defensive
             # in case someone has tagged a resource we do not normally
             # manage with a Name.
-            nbrt.setdefault(resource['ResourceType'], {})
-            nbrt[resource['ResourceType']][resource['Value']] = resource
+            rt, rv = resource['ResourceType'], resource['Value']
+            nbrt.setdefault(rt, {})
+            nbrt[rt].setdefault(rv, [])
+            nbrt[rt][rv].append(resource)
             
         r = self.client.describe_vpcs()
         for v in r['Vpcs']:
@@ -160,7 +161,15 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         assert self.id
         resource_factory = getattr(self.service_resource, resource_factory_methods[self.resource_type])
         self.mob = resource_factory(self.id)
-        self.mob.load()
+        while True:
+            try:
+                self.mob.load()
+                break
+            except:
+                import traceback, time
+                logger.info(f"Waiting for instance {self.id} to be ready...")
+                # traceback.print_exc()
+                time.sleep(4)
         return self.mob
 
 
@@ -173,9 +182,14 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             resource_type = self.resource_type
             names = self.connection.names_by_resource_type[resource_type]
             if self.name in names:
-                self.id = names[self.name]['ResourceId']
-                return await run_in_executor(self.find_from_id)
-        return
+                objs = names[self.name]
+                for obj in objs:
+                    # use the first viable
+                    self.id = obj['ResourceId']
+                    await run_in_executor(self.find_from_id)
+                    if self.mob:
+                        return
+            self.id = None
 
     @setup_task("construct")
     async def find_or_create(self):
@@ -184,22 +198,41 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         # then our check_completed will not have run, so we should
         # explicitly try find, because double creating is bad.
         await self.find()
-        if self.mob: return
+        if self.mob:
+            await self.ainjector(self.post_find_hook)
+            return
         if not self.name: raise RuntimeError('You must specify a name for creation')
+        await self.ainjector(self.pre_create_hook)
         await run_in_executor(self.do_create)
         await self.find()
+        await self.ainjector(self.post_create_hook)
+        await self.ainjector(self.post_find_hook)
         return self.mob
 
     @find_or_create.check_completed()
     async def find_or_create(self):
         await self.find()
-        if self.mob: return True
+        if self.mob:
+            await self.ainjector(self.post_find_hook)
+            return True
         return False
     
     def do_create(self):
-        # run in executor context
+        '''Run in executor context.  Do the actual creation.  Cannot do async things.  Do any necessary async work in pre_create_hook.'''
         raise NotImplementedError
 
+    async def pre_create_hook(self):
+        '''Any async tasks that need to be performed before do_create is called in executor context.  May have injected dependencies.'''
+        pass
+
+    async def post_create_hook(self):
+        '''Any tasks that should be performed in async context after creation.  May have injected dependencies.'''
+        pass
+
+    async def post_find_hook(self):
+        '''Any tasks performed in async context after an object is found or created.  May have injected dependencies.  If you need to perform tasks before find, simply override :meth:`find`'''
+        pass
+    
 
 
     @memoproperty
