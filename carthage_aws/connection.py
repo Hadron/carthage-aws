@@ -55,7 +55,6 @@ class AwsConnection(AsyncInjectable):
         self.igs = []
         self.subnets = []
         self.groups = []
-        self.vms = []
         self.run_vpc = None
         self._inventory()
 
