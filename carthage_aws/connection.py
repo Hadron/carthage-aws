@@ -69,8 +69,10 @@ class AwsConnection(AsyncInjectable):
             # This setdefault should be unnecessary but is defensive
             # in case someone has tagged a resource we do not normally
             # manage with a Name.
-            nbrt.setdefault(resource['ResourceType'], {})
-            nbrt[resource['ResourceType']][resource['Value']] = resource
+            rt, rv = resource['ResourceType'], resource['Value']
+            nbrt.setdefault(rt, {})
+            nbrt[rt].setdefault(rv, [])
+            nbrt[rt][rv].append(resource)
             
         r = self.client.describe_vpcs()
         for v in r['Vpcs']:
@@ -172,9 +174,14 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             resource_type = self.resource_type
             names = self.connection.names_by_resource_type[resource_type]
             if self.name in names:
-                self.id = names[self.name]['ResourceId']
-                return await run_in_executor(self.find_from_id)
-        return
+                objs = names[self.name]
+                for obj in objs:
+                    # use the first viable
+                    self.id = obj['ResourceId']
+                    await run_in_executor(self.find_from_id)
+                    if self.mob:
+                        return
+            self.id = None
 
     @setup_task("construct")
     async def find_or_create(self):
