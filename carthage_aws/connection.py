@@ -167,7 +167,8 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
                 break
             except:
                 import traceback, time
-                traceback.print_exc()
+                logger.info(f"Waiting for instance {self.id} to be ready...")
+                # traceback.print_exc()
                 time.sleep(4)
         return self.mob
 
