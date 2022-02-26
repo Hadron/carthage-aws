@@ -184,22 +184,41 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         # then our check_completed will not have run, so we should
         # explicitly try find, because double creating is bad.
         await self.find()
-        if self.mob: return
+        if self.mob:
+            await self.ainjector(self.post_find_hook)
+            return
         if not self.name: raise RuntimeError('You must specify a name for creation')
+        await self.ainjector(self.pre_create_hook)
         await run_in_executor(self.do_create)
         await self.find()
+        await self.ainjector(self.post_create_hook)
+        await self.ainjector(self.post_find_hook)
         return self.mob
 
     @find_or_create.check_completed()
     async def find_or_create(self):
         await self.find()
-        if self.mob: return True
+        if self.mob:
+            await self.ainjector(self.post_find_hook)
+            return True
         return False
     
     def do_create(self):
-        # run in executor context
+        '''Run in executor context.  Do the actual creation.  Cannot do async things.  Do any necessary async work in pre_create_hook.'''
         raise NotImplementedError
 
+    async def pre_create_hook(self):
+        '''Any async tasks that need to be performed before do_create is called in executor context.  May have injected dependencies.'''
+        pass
+
+    async def post_create_hook(self):
+        '''Any tasks that should be performed in async context after creation.  May have injected dependencies.'''
+        pass
+
+    async def post_find_hook(self):
+        '''Any tasks performed in async context after an object is found or created.  May have injected dependencies.  If you need to perform tasks before find, simply override :meth:`find`'''
+        pass
+    
 
 
     @memoproperty
