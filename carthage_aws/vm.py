@@ -145,6 +145,9 @@ class AwsVm(AwsManaged, Machine):
                 self._find_ip_address()
         return self.running
 
+    async def delete(self):
+        await run_in_executor(self.mob.terminate)
+        
     stamp_type = 'vm'
     resource_type = 'instance'
     
