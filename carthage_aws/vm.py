@@ -67,7 +67,6 @@ class AwsVm(AwsManaged, Machine):
         network_interfaces = []
         device_index = 0
         for l in self.network_links.values():
-            breakpoint()
             network_interfaces.append(
                 {
                     'DeviceIndex': device_index,
