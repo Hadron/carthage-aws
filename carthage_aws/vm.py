@@ -7,6 +7,7 @@
 # LICENSE for details.
 import asyncio, time
 from pathlib import Path
+from ipaddress import IPv4Address
 
 from carthage import *
 from carthage.modeling import *
@@ -14,7 +15,7 @@ from carthage.dependency_injection import *
 from carthage.vm import vm_image
 from carthage.config import ConfigLayout
 from carthage.machine import Machine
-from carthage.network import NetworkConfig
+from carthage.network import NetworkConfig, NetworkLink
 
 import boto3
 from botocore.exceptions import ClientError
@@ -42,25 +43,55 @@ class AwsVm(AwsManaged, Machine):
         self.imageid = self.model.imageid
         self.size = self.model.size
         self.id = None
-        self.vpc = self.connection.run_vpc
+        self._clear_ip_address = True
 
     def _find_ip_address(self):
-        self.mob.load()
-        while True:
-            if self.mob.public_ip_address:
-                self.ip_address = self.mob.public_ip_address
-                break
-            time.sleep(1)
+        def async_cb():
+            for network_link in updated_links:
+                self.injector.emit_event(
+                    InjectionKey(NetworkLink),
+                    "public_address", network_link,
+                    adl_keys=[InjectionKey(NetworkLink, host=self.name)])
+                
+        updated_links = []
+        if self.__class__.ip_address is Machine.ip_address:
+            try:
+                self.ip_address
+                update_ip_address = False
+            except NotImplementedError:
+                update_ip_address = True
 
-    async def pre_create_hook(self):
+        self.mob.wait_until_running()
+        self.mob.reload()
+        local_network_links = filter(lambda l: not l.local_type, self.network_links.values())
+        for network_link, interface in zip(local_network_links, self.mob.network_interfaces):
+            if network_link.net_instance.mob != interface.subnet:
+                logger.warning(f'Instance {self.id}: network links do not match instance interface for {network_link.interface}')
+                continue
+            if not interface.association_attribute: continue
+            association = interface.association_attribute
+            if not ('PublicIp' in association and association['PublicIp']): continue
+            address = IPv4Address(association['PublicIp'])
+            if address != network_link.public_v4_address:
+                network_link.public_v4_address = address
+                updated_links.append(network_link)
+                if update_ip_address:
+                    self.ip_address = str(address)
+                    self._clear_ip_address = True
+        if updated_links:
+            self.ainjector.loop.call_soon_threadsafe(async_cb)
+            
+    async def find(self):
         await self.resolve_networking()
         futures = []
         loop = asyncio.get_event_loop()
-        if not self.network_links:
-            raise RuntimeError('AWS instances require a network link')
+        res = await super().find()
+        if not (self.network_links or self.mob):
+            raise RuntimeError('AWS instances require a network link to create')
         for l in self.network_links.values():
             futures.append(loop.create_task(l.instantiate(AwsSubnet)))
-            await asyncio.gather(*futures)
+        await asyncio.gather(*futures)
+        return res
             
             
     def do_create(self):
@@ -101,15 +132,15 @@ class AwsVm(AwsManaged, Machine):
             if self.mob.state['Name'] == 'terminated':
                 self.mob = None
                 return
-            if self.__class__.ip_address is Machine.ip_address:
-                try:
-                    self.ip_address
-                except NotImplementedError:
-                    self._find_ip_address()
 
+    async def post_find_hook(self):
+        await self.is_machine_running()
+        return await super().post_find_hook()
+    
     async def start_machine(self):
         async with self._operation_lock:
-            if self.running is True: return
+            await self.is_machine_running()
+            if self.running: return
             await self.start_dependencies()
             await super().start_machine()
             if not self.mob:
@@ -118,13 +149,18 @@ class AwsVm(AwsManaged, Machine):
                 if self.running: return
                 logger.info(f'Starting {self.name}')
             await run_in_executor(self.mob.start)
-            self.running = True
+            await run_in_executor(self.mob.wait_until_running)
+            await run_in_executor(self._find_ip_address)
+            return True
+            
 
     async def stop_machine(self):
         async with self._operation_lock:
             if not self.running:
                 return
             await run_in_executor(self.mob.stop)
+            if self._clear_ip_address:
+                del self.ip_address
             self.running = False
             awaitsuper().stop_machine()
 
@@ -133,13 +169,9 @@ class AwsVm(AwsManaged, Machine):
         if not self.mob:
             self.running = False
             return False
-        await run_in_executor(self.mob.load)
         self.running = self.mob.state['Name'] in ('pending', 'running')
-        if self.__class__.ip_address is Machine.ip_address:
-            try:
-                self.ip_address
-            except NotImplementedError:
-                self._find_ip_address()
+        if self.running:
+            await run_in_executor(self._find_ip_address)
         return self.running
 
     async def delete(self):

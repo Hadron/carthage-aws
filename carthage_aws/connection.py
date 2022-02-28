@@ -161,15 +161,14 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         assert self.id
         resource_factory = getattr(self.service_resource, resource_factory_methods[self.resource_type])
         self.mob = resource_factory(self.id)
-        while True:
-            try:
+        try:
+            self.mob.load()
+        except:
+            if hasattr(mob, 'wait_until_exists'):
+                logger.info(f'Waiting for {repr(mob)} to exist')
+                self.mob.wait_until_exists()
                 self.mob.load()
-                break
-            except:
-                import traceback, time
-                logger.info(f"Waiting for instance {self.id} to be ready...")
-                # traceback.print_exc()
-                time.sleep(4)
+            else: raise
         return self.mob
 
 
