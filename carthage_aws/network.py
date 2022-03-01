@@ -95,7 +95,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
         groups =self.connection.client.describe_security_groups(Filters=[
             dict(Name='vpc-id', Values=[self.id])])
 
-        self.groups = groups['SecurityGroups']
+        self.groups = list(filter(lambda g: g['GroupName'] != "default", groups['SecurityGroups']))
         
         
     def delete(self):
