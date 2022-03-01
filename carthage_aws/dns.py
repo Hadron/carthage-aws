@@ -68,7 +68,8 @@ class AwsHostedZone(AwsManaged):
                 return await run_in_executor(self.find_from_id)
         return
 
-    async def do_create(self):
+    # this may want async
+    def do_create(self):
         try:
             r = self.client.create_hosted_zone(
                 Name=self.name,
@@ -85,7 +86,8 @@ class AwsHostedZone(AwsManaged):
             )
             # [12:] is because we want to trim `/hostedzone/` off of the zone Id
             self.id = r['HostedZone']['Id'][12:]
-            await run_in_executor(self.find_from_id)
+            # this may want await
+            run_in_executor(self.find_from_id)
         except ClientError as e:
             logger.error(f'Could not create AwsHostedZone for \
 {self.name} because {e}.')
@@ -108,8 +110,6 @@ class AwsHostedZone(AwsManaged):
                             'ResourceRecordSet': {
                                 'Name': self.name,
                                 'Type': 'NS',
-                                'SetIdentifier': parent.region,
-                                'Region': parent.region,
                                 'TTL': 30,
                                 'ResourceRecords': [
                                     {
@@ -148,8 +148,6 @@ class AwsHostedZone(AwsManaged):
                             'ResourceRecordSet': {
                                 'Name': name,
                                 'Type': type,
-                                'SetIdentifier': self.region,
-                                'Region': self.region,
                                 'TTL': 30,
                                 'ResourceRecords': [
                                     {
