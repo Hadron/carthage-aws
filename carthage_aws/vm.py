@@ -6,6 +6,7 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
 import asyncio, time
+import yaml
 from pathlib import Path
 from ipaddress import IPv4Address
 
@@ -16,6 +17,7 @@ from carthage.vm import vm_image
 from carthage.config import ConfigLayout
 from carthage.machine import Machine
 from carthage.network import NetworkConfig, NetworkLink
+from carthage.cloud_init import generate_cloud_init_cloud_config
 
 import boto3
 from botocore.exceptions import ClientError
@@ -92,7 +94,12 @@ class AwsVm(AwsManaged, Machine):
             futures.append(loop.create_task(l.instantiate(AwsSubnet)))
         await asyncio.gather(*futures)
         return res
-            
+
+    async def pre_create_hook(self):
+        if getattr(self.model, 'cloud_init',False):
+            self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
+        else: self.cloud_config = None
+        
             
     def do_create(self):
         network_interfaces = []
@@ -101,13 +108,18 @@ class AwsVm(AwsManaged, Machine):
             network_interfaces.append(
                 {
                     'DeviceIndex': device_index,
+                    'Description': l.interface,
                     'SubnetId': l.net_instance.id,
                     'AssociatePublicIpAddress': True,
                     'Groups': [ l.net_instance.vpc.groups[0]['GroupId'] ]
                 })
             
 
-
+        user_data = ""
+        if self.cloud_config:
+            user_data = "#cloud-config\n"
+            user_data += yaml.dump(self.cloud_config.user_data, default_flow_style=False)
+            
         logger.info(f'Starting {self.name} VM')
 
         try:
@@ -117,6 +129,7 @@ class AwsVm(AwsManaged, Machine):
                 MaxCount=1,
                 InstanceType=self.size,
                 KeyName=self.key,
+                UserData=user_data,
                 NetworkInterfaces=network_interfaces,
                 TagSpecifications=[self.resource_tags],
             )
