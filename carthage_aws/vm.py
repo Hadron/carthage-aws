@@ -175,7 +175,7 @@ class AwsVm(AwsManaged, Machine):
             if self._clear_ip_address:
                 del self.ip_address
             self.running = False
-            awaitsuper().stop_machine()
+            await super().stop_machine()
 
     async def is_machine_running(self):
         if not self.mob: await self.find()
