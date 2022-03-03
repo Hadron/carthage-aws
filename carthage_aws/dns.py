@@ -75,7 +75,6 @@ class AwsHostedZone(AwsManaged):
                 return await run_in_executor(self.find_from_id)
         return
 
-    # this may want async
     def do_create(self):
         try:
             r = self.client.create_hosted_zone(
@@ -92,9 +91,11 @@ class AwsHostedZone(AwsManaged):
                 }
             )
             # [12:] is because we want to trim `/hostedzone/` off of the zone Id
+            self.mob = r
             self.id = r['HostedZone']['Id'][12:]
-            # this may want await
-            run_in_executor(self.find_from_id)
+            self.config = r['HostedZone']['Config']
+            self.nameservers = r['DelegationSet']['NameServers']
+            self.name = r['HostedZone']['Name']
         except ClientError as e:
             logger.error(f'Could not create AwsHostedZone for \
 {self.name} because {e}.')
@@ -104,42 +105,44 @@ class AwsHostedZone(AwsManaged):
     #    return await super().async_ready()
 
     async def delegate_zone(self, parent):
-        assert type(parent) is AwsHostedZone
-        assert self.name.partition('.')[2] == parent.name
-        try:
-            _ = self.client.change_resource_record_sets(
-                HostedZoneId=parent.id,
-                ChangeBatch={
-                    'Comment': 'Delegated by Carthage',
-                    'Changes': [
-                        {
-                            'Action': 'UPSERT',
-                            'ResourceRecordSet': {
-                                'Name': self.name,
-                                'Type': 'NS',
-                                'TTL': 30,
-                                'ResourceRecords': [
-                                    {
-                                        'Value': self.nameservers[0],
-                                    },
-                                    {
-                                        'Value': self.nameservers[1],
-                                    },
-                                    {
-                                        'Value': self.nameservers[2],
-                                    },
-                                    {
-                                        'Value': self.nameservers[3],
-                                    },
-                                ]
-                            }
-                        },
-                    ]
-                }
-            )
-        except ClientError as e:
-            logger.error(f'Could not upsert *.{self.name} IN NS {self.nameservers} record for \
+        def callback():
+            assert type(parent) is AwsHostedZone
+            assert self.name.partition('.')[2] == parent.name
+            try:
+                _ = self.client.change_resource_record_sets(
+                    HostedZoneId=parent.id,
+                    ChangeBatch={
+                        'Comment': 'Delegated by Carthage',
+                        'Changes': [
+                            {
+                                'Action': 'UPSERT',
+                                'ResourceRecordSet': {
+                                    'Name': self.name,
+                                    'Type': 'NS',
+                                    'TTL': 30,
+                                    'ResourceRecords': [
+                                        {
+                                            'Value': self.nameservers[0],
+                                        },
+                                        {
+                                            'Value': self.nameservers[1],
+                                        },
+                                        {
+                                            'Value': self.nameservers[2],
+                                        },
+                                        {
+                                            'Value': self.nameservers[3],
+                                        },
+                                    ]
+                                }
+                            },
+                        ]
+                    }
+                )
+            except ClientError as e:
+                logger.error(f'Could not upsert *.{self.name} IN NS {self.nameservers} record for \
 {self.name} because {e}.')
+        return await run_in_executor(callback)
 
     # could decorate for other actions
     async def update_record(self, name, value, type):
@@ -191,7 +194,8 @@ class AwsDnsManagement(InjectableModel):
         model = link.machine
         zone = await self.ainjector.get_instance_async(InjectionKey(AwsHostedZone, _ready=True))
         name = link.dns_name or model.name
-        if not name.endswith(zone.name):
+        namefilter = (zone.name,f'{zone.name}.')
+        if not name.endswith(namefilter):
             logger.warning(f'Not setting DNS for {model}: {name} does not fall within {zone.name}')
         else:
             logger.debug(f'{name} is at {str(link.public_v4_address)}')
