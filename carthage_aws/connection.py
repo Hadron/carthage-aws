@@ -164,7 +164,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         try:
             self.mob.load()
         except:
-            if hasattr(mob, 'wait_until_exists'):
+            if hasattr(self.mob, 'wait_until_exists'):
                 logger.info(f'Waiting for {repr(mob)} to exist')
                 self.mob.wait_until_exists()
                 self.mob.load()
