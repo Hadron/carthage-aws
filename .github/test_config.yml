@@ -1,0 +1,10 @@
+plugins:
+  - ..
+authorized_keys: /dev/null
+aws:
+  access_key_id: ${AWS_ACCESS_KEY}
+  secret_access_key: ${AWS_SECRET_KEY}
+  region: us-east-1
+  vpc_name: test_vpc
+base_dir: /tmp/carthage-base
+checkout_dir: /tmp/carthage-base/checkout
