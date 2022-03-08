@@ -1,4 +1,5 @@
 name: Test Carthage AWS Plugin
+concurrency: there_can_only_be_one
 on:
   push: {}
   schedule:
