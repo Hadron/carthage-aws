@@ -31,3 +31,7 @@ class test_layout(CarthageLayout, AwsDnsManagement):
         name="test-vm"
         cloud_init = True
         aws_instance_type = "t2.micro"
+
+    class does_not_exist(MachineModel):
+        aws_readonly = True
+        
