@@ -17,6 +17,8 @@ class test_layout(CarthageLayout, AwsDnsManagement):
     add_provider(machine_implementation_key, dependency_quote(AwsVm))
     add_provider(InjectionKey(AwsHostedZone),
                  when_needed(AwsHostedZone, name="autotest.photon.ac"))
+    aws_key_name = 'main'
+    aws_ami = "ami-06ed7917b75fcaf17"
 
     class our_net(NetworkModel):
         v4_config = V4Config(network="192.168.100.0/24")
@@ -28,6 +30,4 @@ class test_layout(CarthageLayout, AwsDnsManagement):
     class test_vm(MachineModel):
         name="test-vm"
         cloud_init = True
-        key = 'main'
-        imageid = "ami-06ed7917b75fcaf17"
-        size = "t2.micro"
+        aws_instance_type = "t2.micro"
