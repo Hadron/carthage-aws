@@ -10,7 +10,7 @@ from carthage import *
 from carthage_aws import *
 from carthage.modeling import *
 
-class test_layout(CarthageLayout, AwsDnsManagement):
+class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
 
     layout_name = 'aws_test'
 
@@ -19,7 +19,7 @@ class test_layout(CarthageLayout, AwsDnsManagement):
                  when_needed(AwsHostedZone, name="autotest.photon.ac"))
     aws_key_name = 'main'
     aws_ami = "ami-06ed7917b75fcaf17"
-
+    domain = "autotest.photon.ac"
     class our_net(NetworkModel):
         v4_config = V4Config(network="192.168.100.0/24")
 
