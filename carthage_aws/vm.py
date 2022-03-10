@@ -119,15 +119,19 @@ class AwsVm(AwsManaged, Machine):
         logger.info(f'Starting {self.name} VM')
 
         try:
+            extra = {}
+            key_name = self._gfi('aws_key_name', default=None)
+            if key_name: extra['KeyName'] = key_name
+
             r = self.connection.client.run_instances(
                 ImageId=self._gfi('aws_ami'),
                 MinCount=1,
                 MaxCount=1,
                 InstanceType=self._gfi('aws_instance_type'),
-                KeyName=self._gfi('aws_key_name', default=None),
                 UserData=user_data,
                 NetworkInterfaces=network_interfaces,
                 TagSpecifications=[self.resource_tags],
+                **extra
             )
             self.id = r['Instances'][0]['InstanceId']
         except ClientError as e:

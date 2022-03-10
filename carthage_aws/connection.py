@@ -225,7 +225,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         '''
         get_from_injector.  Used to look up some configuration in the model or its enclosing injectors.
     '''
-        k = InjectionKey(key, _optional=( default == "error"))
+        k = InjectionKey(key, _optional=( default != "error"))
         res = self.injector.get_instance(k)
         if res is None and default != "error": res = default
         return res
