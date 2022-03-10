@@ -8,7 +8,6 @@
 import asyncio
 
 import pytest
-
 from carthage import *
 from carthage_aws import *
 from carthage.modeling import *
@@ -27,11 +26,15 @@ def carthage_layout(loop):
 @async_test
 async def test_start_machine(carthage_layout):
     layout = carthage_layout
-    await layout.generate()
-    await layout.ainjector.get_instance_async(AwsConnection)
-    await layout.test_vm.machine.async_become_ready()
-    await layout.test_vm.machine.is_machine_running()
-    layout.test_vm.machine.mob.terminate()
+    try:
+        await layout.generate()
+        await layout.ainjector.get_instance_async(AwsConnection)
+        await layout.test_vm.machine.async_become_ready()
+        await layout.test_vm.machine.is_machine_running()
+        await layout.test_vm.machine.ssh_online()
+    finally:
+        try: layout.test_vm.machine.mob.terminate()
+        except Exception: pass
     
                            
 @async_test
