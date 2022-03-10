@@ -9,6 +9,7 @@
 from carthage import *
 from carthage_aws import *
 from carthage.modeling import *
+from carthage.cloud_init import WriteAuthorizedKeysPlugin
 
 class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
 
@@ -17,7 +18,8 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
     add_provider(machine_implementation_key, dependency_quote(AwsVm))
     add_provider(InjectionKey(AwsHostedZone),
                  when_needed(AwsHostedZone, name="autotest.photon.ac"))
-    aws_key_name = 'main'
+    add_provider(WriteAuthorizedKeysPlugin, allow_multiple=True)
+    #aws_key_name = 'main'
     aws_ami = "ami-06ed7917b75fcaf17"
     domain = "autotest.photon.ac"
     class our_net(NetworkModel):
