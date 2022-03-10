@@ -60,6 +60,7 @@ class AwsHostedZone(AwsManaged):
             self.config = r['HostedZone']['Config']
             self.nameservers = r['DelegationSet']['NameServers']
             self.name = r['HostedZone']['Name']
+            if self.name.endswith('.'): self.name = self.name[:-1]
         except ClientError as e:
             logger.error(f'Could not find hostedzone for {self.id} by id because {e}.')
         return self.mob
