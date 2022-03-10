@@ -1,0 +1,7 @@
+name: aws_development
+python: .
+config:
+  layout_name: aws_development
+  aws:
+    region: us-east-1
+    vpc_name: test_vpc
