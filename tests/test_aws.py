@@ -34,3 +34,10 @@ async def test_start_machine(carthage_layout):
     layout.test_vm.machine.mob.terminate()
     
                            
+@async_test
+async def test_read_only(carthage_layout):
+    layout = carthage_layout
+    await layout.ainjector.get_instance_async(AwsConnection)
+    with pytest.raises(LookupError):
+        await layout.does_not_exist.machine.async_become_ready()
+        

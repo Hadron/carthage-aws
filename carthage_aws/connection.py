@@ -121,16 +121,18 @@ class AwsConnection(AsyncInjectable):
 
 @inject_autokwargs(config_layout=ConfigLayout,
                    connection=InjectionKey(AwsConnection, _ready=True),
+                                      readonly = InjectionKey("aws_readonly", _optional=True),
+                   id=InjectionKey("aws_id", _optional=True),
                    )
 class AwsManaged(SetupTaskMixin, AsyncInjectable):
 
     pass_name_to_super = False # True for machines
 
-    def __init__(self, *, name=None, id=None, **kwargs):
+    def __init__(self, *, name=None, **kwargs):
         if name and self.pass_name_to_super: kwargs['name'] = name
         self.name = name or ""
-        self.id = id
         super().__init__(**kwargs)
+        if not self.readonly: self.readonly = bool(self.id)
         self.mob = None
         
 
@@ -201,6 +203,9 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             await self.ainjector(self.post_find_hook)
             return
         if not self.name: raise RuntimeError('You must specify a name for creation')
+        if self.readonly:
+            raise LookupError(f'{self.__class__.__name__} with name {self.name} not found and readonly enabled.')
+
         await self.ainjector(self.pre_create_hook)
         await run_in_executor(self.do_create)
         await self.find()
@@ -215,6 +220,15 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             await self.ainjector(self.post_find_hook)
             return True
         return False
+
+    def _gfi(self, key, default="error"):
+        '''
+        get_from_injector.  Used to look up some configuration in the model or its enclosing injectors.
+    '''
+        k = InjectionKey(key, _optional=( default == "error"))
+        res = self.injector.get_instance(k)
+        if res is None and default != "error": res = default
+        return res
     
     def do_create(self):
         '''Run in executor context.  Do the actual creation.  Cannot do async things.  Do any necessary async work in pre_create_hook.'''

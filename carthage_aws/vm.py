@@ -41,10 +41,6 @@ class AwsVm(AwsManaged, Machine):
         self.running = False
         self.closed = False
         self._operation_lock = asyncio.Lock()
-        self.key = self.model.key
-        self.imageid = self.model.imageid
-        self.size = self.model.size
-        self.id = None
         self._clear_ip_address = True
 
     def _find_ip_address(self):
@@ -124,11 +120,11 @@ class AwsVm(AwsManaged, Machine):
 
         try:
             r = self.connection.client.run_instances(
-                ImageId=self.imageid,
+                ImageId=self._gfi('aws_ami'),
                 MinCount=1,
                 MaxCount=1,
-                InstanceType=self.size,
-                KeyName=self.key,
+                InstanceType=self._gfi('aws_instance_type'),
+                KeyName=self._gfi('aws_key_name', default=None),
                 UserData=user_data,
                 NetworkInterfaces=network_interfaces,
                 TagSpecifications=[self.resource_tags],
