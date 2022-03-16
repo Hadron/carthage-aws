@@ -20,7 +20,8 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
                  when_needed(AwsHostedZone, name="autotest.photon.ac"))
     add_provider(WriteAuthorizedKeysPlugin, allow_multiple=True)
     #aws_key_name = 'main'
-    aws_ami = "ami-06ed7917b75fcaf17"
+    add_provider(InjectionKey('aws_ami'), image_provider(owner=debian_ami_owner, name='debian-11-amd64-20220310-944'))
+
     domain = "autotest.photon.ac"
     class our_net(NetworkModel):
         v4_config = V4Config(network="192.168.100.0/24")

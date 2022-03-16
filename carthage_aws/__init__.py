@@ -11,11 +11,22 @@ import carthage
 from carthage.dependency_injection import *
 from carthage.config import ConfigSchema
 from carthage.config.types import ConfigString
+__all__ = []
 
 from .connection import AwsConnection
+__all__ += ['AwsConnection']
+
 from .network import AwsVirtualPrivateCloud, AwsSubnet
+__all__ += ['AwsVirtualPrivateCloud', 'AwsSubnet']
+
 from .dns import AwsHostedZone, AwsDnsManagement
+__all__ += ['AwsHostedZone', 'AwsDnsManagement']
+
 from .vm import AwsVm
+__all__ += ['AwsVm']
+
+from .image import image_provider, debian_ami_owner
+__all__ += ['image_provider', 'debian_ami_owner']
 
 class AwsConfig(ConfigSchema, prefix = "aws"):
     #:aws_access_key_id
