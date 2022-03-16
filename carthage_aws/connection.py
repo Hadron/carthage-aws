@@ -26,6 +26,15 @@ resource_factory_methods = dict(
     vpc='Vpc',
     subnet='Subnet',
     volume='Volume'
+    route_table='RouteTable',
+    table_association='RouteTableAssociation',
+    internet_gateway='InternetGateway',
+    nat_gateway='NatGateway',
+    network_interface='NetworkInterface',
+    transit_gateway='TransitGateway',
+    transit_gateway_attachment='TransitGatewayAttachment',
+    transit_gateway_route_table='TransitGatewayRouteTable',
+    transit_gateway_route_table_association='TransitGatewayRouteTableAssociation',
 )
 
 async def run_in_executor(func, *args):
@@ -59,10 +68,25 @@ class AwsConnection(AsyncInjectable):
         self.run_vpc = None
         self._inventory()
 
+    async def carthage_iter(self, cclass, kw, field, idfield):
+        pass
+
+    async def carthage_vpcs(self):
+        from .network import AwsVirtualPrivateCloud
+        for x in self.client.describe_vpcs()['Vpcs']:
+            yield await self.ainjector(AwsVirtualPrivateCloud, id=x['VpcId'])
+
+    async def carthage_subnets(self):
+        from .network import AwsSubnet
+        for x in self.client.describe_subnets()['Subnets']:
+            yield await self.ainjector(AwsSubnet, id=x['SubnetId'])
+
     def _inventory(self):
         # Executor context
         self.names_by_resource_type = {}
         for rt in resource_factory_methods:
+            if '_' in rt:
+                rt='-'.join(rt.split('_'))
             self.names_by_resource_type[rt] = {}
             nbrt = self.names_by_resource_type
         r = self.client.describe_tags(Filters=[dict(Name='key', Values=['Name'])])
@@ -171,7 +195,11 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         tags = []
         if self.name:
             tags.append(dict(Key="Name", Value=self.name))
-        return dict(ResourceType=self.resource_type,
+        if '_' in self.resource_type:
+            rt = '-'.join(self.resource_type.split('_'))
+        else:
+            rt = self.resource_type
+        return dict(ResourceType=rt,
                     Tags=tags)
     
     def find_from_id(self):
@@ -201,7 +229,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         if self.id:
             return await run_in_executor(self.find_from_id)
         elif self.name:
-            resource_type = self.resource_type
+            resource_type = '-'.join(self.resource_type.split('_')) if '_' in self.resource_type else self.resource_type
             names = self.connection.names_by_resource_type[resource_type]
             if self.name in names:
                 objs = names[self.name]
@@ -279,5 +307,3 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         p = p.joinpath("aws_stamps", self.stamp_type+".stamps")
         os.makedirs(p, exist_ok=True)
         return p
-
-
