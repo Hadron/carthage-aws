@@ -95,6 +95,7 @@ class AwsVm(AwsManaged, Machine):
         if getattr(self.model, 'cloud_init',False):
             self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
         else: self.cloud_config = None
+        self.image_id = await self.ainjector.get_instance_async('aws_ami')
         
             
     def do_create(self):
@@ -124,7 +125,7 @@ class AwsVm(AwsManaged, Machine):
             if key_name: extra['KeyName'] = key_name
 
             r = self.connection.client.run_instances(
-                ImageId=self._gfi('aws_ami'),
+                ImageId=self.image_id,
                 MinCount=1,
                 MaxCount=1,
                 InstanceType=self._gfi('aws_instance_type'),
