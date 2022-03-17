@@ -25,6 +25,7 @@ resource_factory_methods = dict(
     instance='Instance',
     vpc='Vpc',
     subnet='Subnet',
+    volume='Volume'
 )
 
 async def run_in_executor(func, *args):
@@ -117,7 +118,20 @@ class AwsConnection(AsyncInjectable):
         await run_in_executor(self._setup)
         return await super().async_ready()
 
+    def invalid_ec2_resource(self, resource_type, id, *, name=None):
+        '''Indicate that a given resource does not (and will not) exist.
+Clean it out of our caches and untag it.
+Run in executor context.
+'''
+        if name:
+            names = self.names_by_resource_type.get(resource_type)
+            if names and name in names:
+                names[name] = list(filter(
+                    lambda r: r['ResourceId'] != id, names[name]))
 
+        self.client.delete_tags(Resources=[id])
+        
+            
 
 @inject_autokwargs(config_layout=ConfigLayout,
                    connection=InjectionKey(AwsConnection, _ready=True),
@@ -127,11 +141,13 @@ class AwsConnection(AsyncInjectable):
 class AwsManaged(SetupTaskMixin, AsyncInjectable):
 
     pass_name_to_super = False # True for machines
-
+    name = None
+    id = None
     def __init__(self, *, name=None, **kwargs):
         if name and self.pass_name_to_super: kwargs['name'] = name
-        self.name = name or ""
+        if name: self.name = name
         super().__init__(**kwargs)
+        if self.id is None and self.__class__.id: self.id = self.__class__.id
         if not self.readonly: self.readonly = bool(self.id)
         self.mob = None
         
@@ -165,12 +181,17 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         self.mob = resource_factory(self.id)
         try:
             self.mob.load()
-        except:
+        except ClientError as e:
             if hasattr(self.mob, 'wait_until_exists'):
                 logger.info(f'Waiting for {repr(self.mob)} to exist')
                 self.mob.wait_until_exists()
                 self.mob.load()
-            else: raise
+            else:
+                logger.warning(f'Failed to load {self}', exc_info=e)
+                self.mob = None
+                if not self.readonly:
+                    self.connection.invalid_ec2_resource(self.resource_type, self.id, name=self.name)
+                return
         return self.mob
 
 
@@ -208,7 +229,11 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
 
         await self.ainjector(self.pre_create_hook)
         await run_in_executor(self.do_create)
-        await self.find()
+        assert self.mob or self.id
+        if not self.mob:
+            await self.find()
+        else:
+            if not self.id: self.id = self.mob.id
         await self.ainjector(self.post_create_hook)
         await self.ainjector(self.post_find_hook)
         return self.mob
