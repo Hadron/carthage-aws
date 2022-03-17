@@ -41,6 +41,17 @@ class AwsHostedZone(AwsManaged):
     def service_resource(self):
         return self.connection.connection.client('route53', region_name=self.connection.region)
 
+    def contains(self, name):
+        '''
+        Returns `bool` representing whether or not zone should contain name
+        '''
+        # we assume self.name has trailing dot as that is returned from the API
+        if name.endswith('.'):
+            return name.endswith(self.name)
+        else:
+            return f'{name}.'.endswith(self.name)
+
+
     def find_from_name(self):
         try:
             # we look for a hosted zone with our exact name
@@ -66,8 +77,9 @@ class AwsHostedZone(AwsManaged):
         return self.mob
     
     async def find(self):
-        '''Find ourself from a name or id
-'''
+        '''
+        Find ourself from a name or id
+        '''
         if self.id:
             return await run_in_executor(self.find_from_id)
         elif self.name:
@@ -91,8 +103,8 @@ class AwsHostedZone(AwsManaged):
                     'PrivateZone': self.private
                 }
             )
-            # [12:] is because we want to trim `/hostedzone/` off of the zone Id
             self.mob = r
+            # [12:] is because we want to trim `/hostedzone/` off of the zone Id
             self.id = r['HostedZone']['Id'][12:]
             self.config = r['HostedZone']['Config']
             self.nameservers = r['DelegationSet']['NameServers']
@@ -101,78 +113,66 @@ class AwsHostedZone(AwsManaged):
             logger.error(f'Could not create AwsHostedZone for \
 {self.name} because {e}.')
 
-    #async def async_ready(self):
-    #    await run_in_executor(self.find_or_create)
-    #    return await super().async_ready()
-
     async def delegate_zone(self, parent):
         def callback():
             assert type(parent) is AwsHostedZone
             assert self.name.partition('.')[2] == parent.name
-            try:
-                _ = self.client.change_resource_record_sets(
-                    HostedZoneId=parent.id,
-                    ChangeBatch={
-                        'Comment': 'Delegated by Carthage',
-                        'Changes': [
-                            {
-                                'Action': 'UPSERT',
-                                'ResourceRecordSet': {
-                                    'Name': self.name,
-                                    'Type': 'NS',
-                                    'TTL': 30,
-                                    'ResourceRecords': [
-                                        {
-                                            'Value': self.nameservers[0],
-                                        },
-                                        {
-                                            'Value': self.nameservers[1],
-                                        },
-                                        {
-                                            'Value': self.nameservers[2],
-                                        },
-                                        {
-                                            'Value': self.nameservers[3],
-                                        },
-                                    ]
-                                }
-                            },
-                        ]
-                    }
-                )
-            except ClientError as e:
-                logger.error(f'Could not upsert *.{self.name} IN NS {self.nameservers} record for \
-{self.name} because {e}.')
+            parent.update_record((self.name, self.nameservers, 'NS'))
         return await run_in_executor(callback)
 
     # could decorate for other actions
-    async def update_record(self, name, value, type):
-        assert type in self.allrrtype
+    async def update_record(self, *args):
+        '''
+        Updates aws route53 record(s)
+        Arguments::
+            *args : must be tuples representing records
+            record (tuple) : (Name, Value, Type) must be specified
+                Value may be list or str
+
+        Typical usage::
+            zone.update_records(
+                [
+                    ('foo.zone.org', '1.2.3.4', 'A'),
+                    ('bar.zone.org', ['ns1.zone.org', 'ns2.zone.org'] 'NS')
+                ]
+            )
+        '''
+        changes = []
+        for a in args:
+            assert type(a) is tuple,ValueError(f"{a} must be a tuple")
+            assert a[2] in self.allrrtype,ValueError(f"{a[2]} must be a valid rrtype {self.allrrtype}")
+            records = []
+            if type(a[1]) is list:
+                for r in a[1]:
+                    records.append(
+                        { 'Value': a[1] }
+                    )
+            else:
+                records.append(
+                    { 'Value': a[1] }
+                )
+            changes.append(
+                {
+                    'Action': 'UPSERT',
+                    'ResourceRecordSet': {
+                        'Name': a[0],
+                        'Type': a[2],
+                        'TTL': 30,
+                        'ResourceRecords': records
+                    }
+                }
+            )
         try:
             _ = self.client.change_resource_record_sets(
                 HostedZoneId=self.id,
                 ChangeBatch={
                     'Comment': 'Created by Carthage',
-                    'Changes': [
-                        {
-                            'Action': 'UPSERT',
-                            'ResourceRecordSet': {
-                                'Name': name,
-                                'Type': type,
-                                'TTL': 30,
-                                'ResourceRecords': [
-                                    {
-                                        'Value': value
-                                    },
-                                ]
-                            }
-                        },
-                    ]
+                    'Changes': changes,
                 }
             )
         except ClientError as e:
-            logger.error(f'Could not upsert {value} IN {type} {name} record for \
-{self.name} because {e}.')
+            logger.error(f'Could not upsert {args} because {e}.')
+
 
 class AwsDnsManagement(InjectableModel):
 
@@ -195,12 +195,11 @@ class AwsDnsManagement(InjectableModel):
         model = link.machine
         zone = await self.ainjector.get_instance_async(InjectionKey(AwsHostedZone, _ready=True))
         name = link.dns_name or model.name
-        namefilter = (zone.name,f'{zone.name}.')
-        if not name.endswith(namefilter):
+        if not zone.contains(name):
             logger.warning(f'Not setting DNS for {model}: {name} does not fall within {zone.name}')
         else:
             logger.debug(f'{name} is at {str(link.public_v4_address)}')
-            await zone.update_record(name, str(link.public_v4_address), 'A')
+            await zone.update_record((name, str(link.public_v4_address), 'A'))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
