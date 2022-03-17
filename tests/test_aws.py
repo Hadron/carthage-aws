@@ -44,3 +44,14 @@ async def test_read_only(carthage_layout):
     with pytest.raises(LookupError):
         await layout.does_not_exist.machine.async_become_ready()
         
+@async_test
+async def test_create_volume(carthage_layout):
+    layout = carthage_layout
+    con = await layout.ainjector.get_instance_async(AwsConnection)
+    vol = None
+    try:
+        vol = await layout.ainjector.get_instance_async('some_volume')
+
+    finally:
+        if vol: await vol.delete()
+        

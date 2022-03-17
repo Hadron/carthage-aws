@@ -28,6 +28,9 @@ __all__ += ['AwsVm']
 from .image import image_provider, debian_ami_owner
 __all__ += ['image_provider', 'debian_ami_owner']
 
+from .ebs import AwsVolume
+__all__ += ['AwsVolume']
+
 class AwsConfig(ConfigSchema, prefix = "aws"):
     #:aws_access_key_id
     access_key_id: ConfigString

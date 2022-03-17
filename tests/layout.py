@@ -38,3 +38,8 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
     class does_not_exist(MachineModel):
         aws_readonly = True
         
+    class some_volume(AwsVolume):
+        volume_size = 4
+        aws_availability_zone = 'us-east-1a'
+        name = "some_volume"
+        
