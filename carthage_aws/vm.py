@@ -92,10 +92,16 @@ class AwsVm(AwsManaged, Machine):
         return res
 
     async def pre_create_hook(self):
-        if getattr(self.model, 'cloud_init',False):
-            self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
-        else: self.cloud_config = None
-        self.image_id = await self.ainjector.get_instance_async('aws_ami')
+        async with self._operation_lock:
+            if getattr(self.model, 'cloud_init',False):
+                self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
+            else: self.cloud_config = None
+            self.image_id = await self.ainjector.get_instance_async('aws_ami')
+            await self.start_dependencies()
+            await super().start_machine()
+            # Dropping the operation lock at this point is not ideal,
+            # but is probably okay because we should be protected by
+            # the async_ready future
         
             
     def do_create(self):
@@ -158,13 +164,13 @@ class AwsVm(AwsManaged, Machine):
             await self.start_dependencies()
             await super().start_machine()
             if not self.mob:
-                await self.find_or_create()
+                await self.find_or_create() #presumably create since is_machine_running calls find already
                 await self.is_machine_running
                 if self.running: return
                 logger.info(f'Starting {self.name}')
             await run_in_executor(self.mob.start)
             await run_in_executor(self.mob.wait_until_running)
-            await run_in_executor(self._find_ip_address)
+            await self.is_machine_running()
             return True
             
 
