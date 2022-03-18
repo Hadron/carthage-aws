@@ -6,6 +6,8 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
 
+import asyncio
+
 from carthage import *
 from carthage.machine import AbstractMachineModel
 from carthage.modeling import *
@@ -37,6 +39,19 @@ class AwsVolume(AwsManaged, InjectableModel):
     async def delete(self):
         await run_in_executor(self.mob.delete)
 
+
+    async def wait_for_available(self):
+        tries = 0
+        if self.mob.state == 'available': return
+        if self.mob.state != 'creating':
+            raise RuntimeError('Unexpected state')
+        
+        while tries < 30:
+            if self.mob.state != 'creating': return
+            await asyncio.sleep(5)
+            await run_in_executor(self.mob.reload)
+            tries += 1
+            
     async def attach(self, instance, device, delete_on_termination=True):
         from .vm import AwsVm
         def callback():
@@ -58,6 +73,7 @@ class AwsVolume(AwsManaged, InjectableModel):
             assert isinstance(instance.machine,AwsVm)
             instance_id = instance.machine.id
         else: instance_id = instance
+        await self.wait_for_available()
         await run_in_executor(callback)
         
 __all__ += ['AwsVolume']
