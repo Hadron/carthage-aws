@@ -5,13 +5,18 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
-import asyncio
+import asyncio, logging
+
 
 import pytest
 from carthage import *
 from carthage_aws import *
 from carthage.modeling import *
 from carthage.pytest import *
+
+# The boto logging is way too verbose
+logging.getLogger('boto3').setLevel(logging.WARNING)
+logging.getLogger('botocore').setLevel(logging.WARNING)
 
 from layout import test_layout
 @pytest.fixture(scope='session')
