@@ -42,4 +42,10 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
         volume_size = 4
         aws_availability_zone = 'us-east-1a'
         name = "some_volume"
-        
+    class instance_for_volume(MachineModel, AsyncInjectable):
+        aws_instance_type = 't3.micro'
+
+        class volume(AwsVolume):
+            volume_size = 4
+            name = "attach_me"
+            

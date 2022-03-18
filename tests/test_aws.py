@@ -51,7 +51,21 @@ async def test_create_volume(carthage_layout):
     vol = None
     try:
         vol = await layout.ainjector.get_instance_async('some_volume')
-
     finally:
         if vol: await vol.delete()
-        
+
+@async_test
+async def test_attach_volume(carthage_layout):
+    layout = carthage_layout
+    con = await layout.ainjector.get_instance_async(AwsConnection)
+    vol = None
+    try:
+        instance =  layout.instance_for_volume
+        await instance.machine.async_become_ready()
+        instance.injector.add_provider(InjectionKey('aws_availability_zone'), instance.machine.mob.placement['AvailabilityZone'])
+        vol = await instance.ainjector.get_instance_async('volume')
+        await vol.attach(instance=instance, device="xvdi")
+        vol = None
+    finally:
+        if vol: await vol.delete()
+        await         instance.machine.delete()

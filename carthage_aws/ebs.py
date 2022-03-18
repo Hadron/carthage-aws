@@ -7,6 +7,7 @@
 # LICENSE for details.
 
 from carthage import *
+from carthage.machine import AbstractMachineModel
 from carthage.modeling import *
 from .connection import AwsManaged, AwsConnection, run_in_executor
 
@@ -35,5 +36,28 @@ class AwsVolume(AwsManaged, InjectableModel):
 
     async def delete(self):
         await run_in_executor(self.mob.delete)
+
+    async def attach(self, instance, device, delete_on_termination=True):
+        from .vm import AwsVm
+        def callback():
+            self.connection.client.attach_volume(
+                VolumeId=self.id,
+                InstanceId=instance_id,
+                Device=device)
+            if delete_on_termination:
+                self.connection.client.modify_instance_attribute(
+                    InstanceId=instance_id,
+                    BlockDeviceMappings=[dict(
+                        DeviceName=device,
+                        Ebs=dict(DeleteOnTermination=delete_on_termination))])
+            self.mob.reload()
+
+        if isinstance(instance,AwsVm):
+            instance_id = instance.id
+        elif isinstance(instance,AbstractMachineModel):
+            assert isinstance(instance.machine,AwsVm)
+            instance_id = instance.machine.id
+        else: instance_id = instance
+        await run_in_executor(callback)
         
 __all__ += ['AwsVolume']
