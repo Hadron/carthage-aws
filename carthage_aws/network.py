@@ -15,30 +15,69 @@ from .connection import AwsConnection, AwsManaged, run_in_executor
 
 import boto3
 from botocore.exceptions import ClientError
+from ipaddress import IPv4Network
 
 __all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet', 'AwsInternetGateway', 'AwsRouteTable', 'AwsNetworkInterface']
 
 class AwsVirtualPrivateCloud(AwsManaged):
 
-    stamp_type = "vpc"
+    stamp_type = 'vpc'
     resource_type = 'vpc'
 
     def __init__(self, cidrblock=None, **kwargs):
+
         super().__init__( **kwargs)
-        config = self.config_layout
-        if not self.name and config.aws.vpc_name:
-            self.name = config.aws.vpc_name 
-        if not self.id and config.aws.vpc_id:
-            self.id = config.aws.vpc_id
-        if not (self.name or self.id):
-            raise ValueError("You must specify either an AWS VPC ID or VPC name.")
-        self.name = self.name or ''
-        self.groups = []
-        self.vms = []
-        if cidrblock != None:
+
+        c_aws = self.config_layout.aws
+
+        if cidrblock is not None:
+            assert not hasattr(self, 'model')
             self.cidrblock = cidrblock
         else:
-            self.cidrblock = str(self.config_layout.aws.vpc_cidr), 
+            self.cidrblock = getattr(getattr(self, 'model', object()), 'cidrblock', None)
+
+        if self.cidrblock is None:
+            self.cidrblock = str(IPv4Network(c_aws.vpc_cidr))
+
+        if self.name is None:
+            self.name = getattr(getattr(self, 'model', object()), 'name', None)
+
+        if self.name is None:
+            self.name = c_aws.vpc_name 
+
+        if self.id is None:
+            self.id = getattr(getattr(self, 'model', object()), 'id', None)
+
+        if self.id is None:
+            self.id = c_aws.vpc_id
+
+        if not (self.name or self.id):
+            breakpoint()
+            raise ValueError("You must specify either an AWS VPC ID or VPC name.")
+
+        self.groups = []
+
+    def make_ig():
+        if make_ig:
+            ig = self.connection.client.create_internet_gateway()
+            self.ig = ig['InternetGateway']['InternetGatewayId']
+            self.connection.client.attach_internet_gateway(InternetGatewayId=self.ig, VpcId=self.id)
+            self.connection.client.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=self.ig, RouteTableId=self.main_route_table_id)
+            sg = self.connection.client.create_security_group(GroupName=f'{self.name} open', VpcId=self.id, Description=f'{self.name} open')
+            self.groups.append(sg)
+
+            self.connection.client.authorize_security_group_ingress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
+                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
+            ])
+            self.connection.client.authorize_security_group_egress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
+                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
+                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
+            ])
 
     def do_create(self):
         try:
@@ -54,26 +93,6 @@ class AwsVirtualPrivateCloud(AwsManaged):
                 if ig['vpc'] == self.id:
                     make_ig = False
                     break
-            if make_ig:
-                ig = self.connection.client.create_internet_gateway()
-                self.ig = ig['InternetGateway']['InternetGatewayId']
-                self.connection.client.attach_internet_gateway(InternetGatewayId=self.ig, VpcId=self.id)
-                self.connection.client.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=self.ig, RouteTableId=self.main_route_table_id)
-                sg = self.connection.client.create_security_group(GroupName=f'{self.name} open', VpcId=self.id, Description=f'{self.name} open')
-                self.groups.append(sg)
-            
-                self.connection.client.authorize_security_group_ingress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
-                ])
-                self.connection.client.authorize_security_group_egress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
-                ])
 
         except ClientError as e:
             logger.error(f'Could not create AWS VPC {self.name} due to {e}.')
@@ -213,17 +232,48 @@ class AwsRouteTable(AwsManaged):
 
         self.name = f'{self.subnet.name}-rt'
 
+    def _add_route(self, net, target, kind=None):
+
+        from .transit import AwsTransitGateway
+
+        if kind is None:
+            if isinstance(target, AwsInternetGateway):
+                kind = 'Gateway'
+            elif isinstance(target, AwsTransitGateway):
+                kind = 'TransitGateway'
+            elif isinstance(target, AwsTransitGateway):
+                kind = 'TransitGateway'
+            elif getattr(target, 'interface_type', None) == 'interface':
+                kind = 'NetworkInterface'
+            else:
+                raise ValueError(f'unknown target type for: {target}')
+
+        kwargs = {
+            'DestinationCidrBlock': net,
+            f'{kind}Id': target.id
+        }
+        try:
+            r = self.mob.create_route(**kwargs)
+        except ClientError as e:
+            logger.error(f'Could not create route {net}->{target} due to {e}.')
+
     async def add_route(self, cidrblock, target, target_type, exists_ok=False):
-        def callback():
-            kwargs = {
-                'DestinationCidrBlock':cidrblock,
-                f'{target_type}Id':target.id
-            }
-            try:
-                r = self.mob.create_route(**kwargs)
-            except ClientError as e:
-                logger.error(f'Could not create route {cidrblock}->{target.id} due to {e}.')
-        await run_in_executor(callback)
+        await run_in_executor(self.add_route, cidrblock, target)
+
+    async def set_routes(self, *routes, exists_ok=False):
+        def callback(routes):
+            numlocal = 0
+            for r in list(reversed(self.mob.routes)):
+                if r.gateway_id == 'local':
+                    numlocal += 1
+                else:
+                    r.delete()
+            assert numlocal == 1
+            self.mob.load()
+            for v in routes:
+                self._add_route(*v)
+            self.mob.load()
+        await run_in_executor(callback, routes)
 
     async def delete(self):
         if hasattr(self, 'association'):
@@ -300,7 +350,8 @@ class AwsInternetGateway(AwsManaged):
 
     async def post_find_hook(self): 
         if hasattr(self.mob, 'attachments'):
-            setattr(self, 'attachment', self.mob.attachments[0])
+            if len(self.mob.attachments) > 0:
+                setattr(self, 'attachment', self.mob.attachments[0])
 
 @inject_autokwargs(subnet=AwsSubnet)
 class AwsNetworkInterface(AwsManaged):

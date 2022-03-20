@@ -29,8 +29,7 @@ __all__ = ['AwsVm']
 
 
 
-@inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True),
-                   )
+@inject_autokwargs(connection=InjectionKey(AwsConnection))
 class AwsVm(AwsManaged, Machine):
 
     pass_name_to_super = True
@@ -108,15 +107,17 @@ class AwsVm(AwsManaged, Machine):
         network_interfaces = []
         device_index = 0
         for l in self.network_links.values():
-            network_interfaces.append(
-                {
-                    'DeviceIndex': device_index,
-                    'Description': l.interface,
-                    'SubnetId': l.net_instance.id,
-                    'AssociatePublicIpAddress': True,
-                    'Groups': [ l.net_instance.vpc.groups[0]['GroupId'] ]
-                })
-            
+            d = {
+                'DeviceIndex': device_index,
+                'Description': l.interface,
+                'SubnetId': l.net_instance.id,
+            }
+            if len(self.network_links) == 1:
+                d['AssociatePublicIpAddress'] = True
+            if l.net_instance.vpc.groups:
+                d['Groups'] = [ l.net_instance.vpc.groups[0]['GroupId'] ]
+            network_interfaces.append(d)
+            device_index += 1
 
         user_data = ""
         if self.cloud_config:

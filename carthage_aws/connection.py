@@ -26,6 +26,7 @@ resource_factory_methods = dict(
     vpc='Vpc',
     subnet='Subnet',
     volume='Volume'
+    key_pair='KeyPair',
     route_table='RouteTable',
     table_association='RouteTableAssociation',
     internet_gateway='InternetGateway',
@@ -48,15 +49,17 @@ class AwsConnection(AsyncInjectable):
         self.config = self.config_layout.aws
         self.connection = None
 
-
     async def inventory(self):
         await run_in_executor(self._inventory)
     def _setup(self):
+        if not self.config.access_key_id: breakpoint()
+        if not self.config.secret_access_key: breakpoint()
+        self.region = self.config.region
         self.connection = boto3.Session(
             aws_access_key_id=self.config.access_key_id,
-            aws_secret_access_key=self.config.secret_access_key
+            aws_secret_access_key=self.config.secret_access_key,
+            region_name=self.region
         )
-        self.region = self.config.region
         self.client = self.connection.client('ec2', region_name=self.region)
         self.keys = []
         for key in self.client.describe_key_pairs()['KeyPairs']:
@@ -158,8 +161,8 @@ Run in executor context.
             
 
 @inject_autokwargs(config_layout=ConfigLayout,
-                   connection=InjectionKey(AwsConnection, _ready=True),
-                                      readonly = InjectionKey("aws_readonly", _optional=True),
+                   connection=InjectionKey(AwsConnection),
+                   readonly=InjectionKey("aws_readonly", _optional=True),
                    id=InjectionKey("aws_id", _optional=True),
                    )
 class AwsManaged(SetupTaskMixin, AsyncInjectable):

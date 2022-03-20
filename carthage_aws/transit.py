@@ -215,6 +215,20 @@ class AwsTransitGatewayRouteTable(AwsManaged):
         except ClientError as e:
             logger.error(f'{e}')
 
+    async def create_route(self, cidrblock, attachment):
+        def callback():
+            try:
+                _ = self.client.create_transit_gateway_route(
+                        DestinationCidrBlock=cidrblock,
+                        TransitGatewayRouteTableId=self.id,
+                        TransitGatewayAttachmentId=attachment.id,
+                        Blackhole=False
+                    )
+                logger.info(f"Created route {cidrblock}->{attachment} on {self}")
+            except ClientError as e:
+                logger.error(f"Could not create AwsTransitGatewayRoute on {self} due to {e}")
+        await run_in_executor(callback)
+
     async def disassociate(self, association):
         '''Disassociate route table with AwsTransitGatewayAttachment'''
         assert self.association!=None,"You must have an association"
@@ -244,13 +258,13 @@ class AwsTransitGatewayRouteTable(AwsManaged):
 
     async def depropagate(self, propagation):
         '''Disable propagation of routes to table from AwsTransitGatewayAttachment'''
-        assert hasattr(self, 'propagation'),"You must have propagations"
+        # assert hasattr(self, 'propagation'),"You must have propagations"
         try:
-            r = self.client.disable_transit_gateway_route_propagation(
+            r = self.client.disable_transit_gateway_route_table_propagation(
                 TransitGatewayRouteTableId=self.id,
                 TransitGatewayAttachmentId=propagation.id
             )
-            self.propagations.remove(propagation)
+            # self.propagations.remove(propagation)
         except ClientError as e:
             logger.error(f'{e}')
         
