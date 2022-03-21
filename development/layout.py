@@ -5,7 +5,7 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
-
+import os.path
 from carthage import *
 from carthage_aws import *
 from carthage_base import *
@@ -41,8 +41,12 @@ async def dev_layout(injector):
             cloud_init = True
             aws_instance_type = 't3.medium'
             name = config.developer.machine
-            copy_in_checkouts = False
-
+            copy_in_checkouts = True
+            layout_source = os.path.dirname(__file__)
+            layout_destination = "carthage_aws"
+            aws_image_size = 8
+            attach_image_volume = AttachImageBuilderVolume
+            
             class install_software(MachineCustomization):
                 @setup_task("Install useful software")
                 async def install(self):
