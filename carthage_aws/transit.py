@@ -43,8 +43,7 @@ class AwsTransitGateway(AwsManaged):
         await run_in_executor(callback)
 
     def do_create(self):
-        class mock: pass
-        self.mob = mock()
+        self.mob = self
         try:
             r = self.client.create_transit_gateway(
                 Description='Created by Carthage',
@@ -68,8 +67,6 @@ class AwsTransitGateway(AwsManaged):
             )
 
             self.id = r['TransitGateway']['TransitGatewayId']
-            self.mob.id = self.id
-
             self.arn = r['TransitGateway']['TransitGatewayArn']
             self.state = r['TransitGateway']['State']
             self.asn = r['TransitGateway']['Options']['AmazonSideAsn']
@@ -85,7 +82,7 @@ class AwsTransitGateway(AwsManaged):
             await asyncio.sleep(5)
 
     def find_from_id(self):
-        self.mob = type('AwsTransitGateway', (object,), self.__dict__)
+        self.mob = self
         r = self.client.describe_transit_gateways(TransitGatewayIds=[self.id])
         for t in r['TransitGateways'][0]['Tags']:
             if t['Key'] == 'Name':
@@ -188,8 +185,7 @@ class AwsTransitGatewayRouteTable(AwsManaged):
             logger.error(f'{e}')
         
     def do_create(self):
-        class mock: pass
-        self.mob = mock()
+        self.mob = self
         try:
             r = self.client.create_transit_gateway_route_table(
                 TransitGatewayId=self.tgw.id,
@@ -217,17 +213,6 @@ class AwsTransitGatewayRouteTable(AwsManaged):
             print(f'waiting on tgw_route_table: {self}')
             await asyncio.sleep(5)
 
-    def find_from_id(self):
-        class mock: pass
-        self.mob = mock()
-        try:
-            r = self.client.describe_transit_gateway_route_tables(TransitGatewayRouteTableIds=[self.id])['TransitGatewayRouteTables'][0]
-            # should we bother
-            # we already know the id and the tgw id
-        except ClientError as e:
-            logger.error(f'Could not find TransitGatewayRouteTable for {self.id} by id because {e}.')
-        return self.mob
-
 @inject_autokwargs(tgw=AwsTransitGateway, vpc=AwsVirtualPrivateCloud, subnet=AwsSubnet)
 class AwsTransitGatewayAttachment(AwsManaged):
 
@@ -245,9 +230,7 @@ class AwsTransitGatewayAttachment(AwsManaged):
         return self.connection.connection.client('ec2', region_name=self.connection.region)
         
     def do_create(self):
-        class mock: pass
-        self.mob = mock()
-        self.mob.id = None
+        self.mob = self
         r = self.client.create_transit_gateway_vpc_attachment(
             TransitGatewayId=self.tgw.id,
             VpcId=self.vpc.id,
@@ -283,8 +266,7 @@ class AwsTransitGatewayAttachment(AwsManaged):
             await asyncio.sleep(5)
 
     def find_from_id(self):
-        class mock: pass
-        self.mob = mock()
+        self.mob = self
         try:
             r = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[self.id])['TransitGatewayAttachments'][0]
             self.attached_resource_type = r['ResourceType']
