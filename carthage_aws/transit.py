@@ -11,6 +11,9 @@ from dataclasses import dataclass, field
 from botocore.exceptions import ClientError
 
 class AwsTransitGateway(AwsManaged):
+
+    resource_type = 'transit_gateway'
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -20,6 +23,24 @@ class AwsTransitGateway(AwsManaged):
     def service_resource(self):
         # override because ec2 resource does not support transit gateway
         return self.connection.connection.client('ec2', region_name=self.connection.region)
+
+    async def foreign_attachment(self, attachment):
+        '''Args: AwsTransitGatewayAttachment'''
+        def callback():
+            state = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[attachment.id])['TransitGatewayAttachments'][0]['State']
+            if state not in ['pending', 'available']:
+                r = self.client.accept_transit_gateway_vpc_attachment(TransitGatewayAttachmentId=attachment.id)
+            while state != 'available':
+                state = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[attachment.id])['TransitGatewayAttachments'][0]['State']
+                asyncio.sleep(5)
+                print(f'waiting on {self} accepting foreign_attachment: {attachment}')
+            r = self.client.create_tags(
+                Resources=[attachment.id],
+                Tags=[dict(Key='Name', Value=attachment.name)],
+            )
+            # TODO
+            # associate route table
+        await run_in_executor(callback)
 
     def do_create(self):
         class mock: pass
@@ -58,40 +79,19 @@ class AwsTransitGateway(AwsManaged):
 
     async def post_find_hook(self):
         while True:
-            r = self.client.describe_transit_gateways(TransitGatewayIds=[self.id])
-            state = r['TransitGateways'][0]['State']
+            state = self.client.describe_transit_gateways(TransitGatewayIds=[self.id])['TransitGateways'][0]['State']
             if state == 'available': break
             print(f'waiting on tgw: {self}')
-            await asyncio.sleep(1)
-
-    def find_from_name(self):
-        from .utils import has_tag_matching
-        r = self.client.describe_transit_gateways()['TransitGateways']
-        for o in r:
-            if o['State'] == 'deleted': continue
-            if has_tag_matching(o['Tags'], 'Name', self.name):
-                self.id = o['TransitGatewayId']
+            await asyncio.sleep(5)
 
     def find_from_id(self):
-        class mock: pass
-        self.mob = mock()
+        self.mob = type('AwsTransitGateway', (object,), self.__dict__)
         r = self.client.describe_transit_gateways(TransitGatewayIds=[self.id])
         for t in r['TransitGateways'][0]['Tags']:
             if t['Key'] == 'Name':
                 self.name = t['Value']
         return self.mob
     
-    async def find(self):
-        '''Find ourself from a name or id
-'''
-        if self.id:
-            return await run_in_executor(self.find_from_id)
-        elif self.name:
-            await run_in_executor(self.find_from_name)
-            if self.id:
-                return await run_in_executor(self.find_from_id)
-        return
-
 @dataclass(repr=False)
 class AwsTransitGatewayRoute:
     cidrblock: str = ''
@@ -107,6 +107,8 @@ class AwsTransitGatewayRoute:
 
 @inject_autokwargs(tgw=AwsTransitGateway)
 class AwsTransitGatewayRouteTable(AwsManaged):
+
+    resource_type = 'transit-gateway-route-table'
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -213,15 +215,7 @@ class AwsTransitGatewayRouteTable(AwsManaged):
             state = r['TransitGatewayRouteTables'][0]['State']
             if state == 'available': break
             print(f'waiting on tgw_route_table: {self}')
-            await asyncio.sleep(1)
-
-    def find_from_name(self):
-        from .utils import has_tag_matching
-        r = self.client.describe_transit_gateway_route_tables()['TransitGatewayRouteTables']
-        for o in r:
-            if o['State'] == 'deleted': continue
-            if has_tag_matching(o['Tags'], 'Name', self.name):
-                self.id = o['TransitGatewayRouteTableId']
+            await asyncio.sleep(5)
 
     def find_from_id(self):
         class mock: pass
@@ -234,22 +228,10 @@ class AwsTransitGatewayRouteTable(AwsManaged):
             logger.error(f'Could not find TransitGatewayRouteTable for {self.id} by id because {e}.')
         return self.mob
 
-    async def find(self):
-        '''Find ourself from a name or id
-'''
-        if self.id:
-            return await run_in_executor(self.find_from_id)
-        elif self.name:
-            await run_in_executor(self.find_from_name)
-            if self.id:
-                return await run_in_executor(self.find_from_id)
-        return
-
-
 @inject_autokwargs(tgw=AwsTransitGateway, vpc=AwsVirtualPrivateCloud, subnet=AwsSubnet)
 class AwsTransitGatewayAttachment(AwsManaged):
 
-    resource_type = 'transit-gateway-attachment'
+    resource_type = 'transit_gateway_attachment'
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -262,39 +244,6 @@ class AwsTransitGatewayAttachment(AwsManaged):
     def service_resource(self):
         return self.connection.connection.client('ec2', region_name=self.connection.region)
         
-    # self.attachments = []
-    # r = self.client.describe_transit_gateway_attachments(
-    #     Filters=[{'Name': 'transit-gateway-id','Values': [self.id,]},]
-    # )
-    # for x in r['TransitGatewayAttachments']:
-    #     name = ''
-    #     for t in x['Tags']:
-    #         if t['Key'] == 'Name':
-    #             name = t['Value']
-    #     association_id = ''
-    #     associated = False
-    #     association_type = ''
-    #     if 'Association' in x.keys():
-    #         association_id = x['Association']['TransitGatewayRouteTableId']
-    #         associated = (x['Association']['State'] == 'associated')
-    #         association_type = 'TransitGatewayRouteTable'
-    #     self.attachments.append(
-    #         AwsTransitGatewayAttachment(
-    #             id = x['TransitGatewayAttachmentId'],
-    #             name = name,
-    #             resource_id = x['ResourceId'],
-    #             resource_type = x['ResourceType'],
-    #             association_type = 'TransitGatewayRouteTable',
-    #             association_id = association_id,
-    #             associated = associated
-    #         )
-    #     )
-
-    async def foreign_attachment(self, attachment):
-        def callback():
-            r = self.client.accept_transit_gateway_vpc_attachment(TransitGatewayAttachmentId=attachment.id)
-        await run_in_executor(callback)
-
     def do_create(self):
         class mock: pass
         self.mob = mock()
@@ -329,17 +278,9 @@ class AwsTransitGatewayAttachment(AwsManaged):
         while True:
             r = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[self.id])
             state = r['TransitGatewayAttachments'][0]['State']
-            if state == 'available': break
+            if state in ['available', 'pendingAcceptance']: break
             print(f'waiting on tgw_attach: {self}')
-            await asyncio.sleep(1)
-
-    def find_from_name(self):
-        from .utils import has_tag_matching
-        r = self.client.describe_transit_gateway_attachments()['TransitGatewayAttachments']
-        for o in r:
-            if o['State'] == 'deleted': continue
-            if has_tag_matching(o['Tags'], 'Name', self.name):
-                self.id = o['TransitGatewayAttachmentId']
+            await asyncio.sleep(5)
 
     def find_from_id(self):
         class mock: pass
@@ -356,14 +297,3 @@ class AwsTransitGatewayAttachment(AwsManaged):
         except ClientError as e:
             logger.error(f'Could not find TransitGatewayAttachment for {self.id} by id because {e}.')
         return self.mob
-
-    async def find(self):
-        '''Find ourself from a name or id
-'''
-        if self.id:
-            return await run_in_executor(self.find_from_id)
-        elif self.name:
-            await run_in_executor(self.find_from_name)
-            if self.id:
-                return await run_in_executor(self.find_from_id)
-        return
