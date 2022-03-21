@@ -24,7 +24,7 @@ class AwsTransitGateway(AwsManaged):
         # override because ec2 resource does not support transit gateway
         return self.connection.connection.client('ec2', region_name=self.connection.region)
 
-    async def foreign_attachment(self, attachment):
+    async def create_foreign_attachment(self, attachment):
         '''Args: AwsTransitGatewayAttachment'''
         def callback():
             state = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[attachment.id])['TransitGatewayAttachments'][0]['State']
@@ -56,14 +56,7 @@ class AwsTransitGateway(AwsManaged):
                     'DnsSupport': 'disable',
                     'MulticastSupport': 'disable',
                 },
-                TagSpecifications=[
-                    {
-                        'ResourceType':'transit-gateway',
-                        'Tags':[
-                            {'Key':'Name', 'Value':self.name}
-                        ]
-                    },
-                ]
+                TagSpecifications=[self.resource_tags]
             )
 
             self.id = r['TransitGateway']['TransitGatewayId']
@@ -91,6 +84,8 @@ class AwsTransitGateway(AwsManaged):
     
 @dataclass(repr=False)
 class AwsTransitGatewayRoute:
+    resource_type = 'transit-gateway-route'
+
     cidrblock: str = ''
     attachments: str = ''
     attachment_id: str = ''
@@ -189,17 +184,7 @@ class AwsTransitGatewayRouteTable(AwsManaged):
         try:
             r = self.client.create_transit_gateway_route_table(
                 TransitGatewayId=self.tgw.id,
-                TagSpecifications=[
-                    {
-                        'ResourceType':'transit-gateway-route-table',
-                        'Tags':[
-                            {
-                                'Key':'Name',
-                                'Value': self.name
-                            }
-                        ]
-                    }
-                ]
+                TagSpecifications=[self.resource_tags]
             )
         except ClientError as e:
             logger.error(f'Could not create TransitGatewayAttachment for {self.id} because {e}.')
@@ -242,17 +227,7 @@ class AwsTransitGatewayAttachment(AwsManaged):
                 'Ipv6Support': 'disable',
                 'ApplianceModeSupport': 'disable'
             },
-            TagSpecifications=[
-                {
-                    'ResourceType': 'transit-gateway-attachment',
-                    'Tags': [
-                        {
-                            'Key': 'Name',
-                            'Value': self.name
-                        },
-                    ]
-                },
-            ]
+            TagSpecifications=[self.resource_tags]
         )['TransitGatewayVpcAttachment']
         self.id = r['TransitGatewayAttachmentId']
         return self.mob
