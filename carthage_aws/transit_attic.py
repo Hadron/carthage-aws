@@ -1,4 +1,32 @@
 #from    def find_from_id(self):
+    # self.attachments = []
+    # r = self.client.describe_transit_gateway_attachments(
+    #     Filters=[{'Name': 'transit-gateway-id','Values': [self.id,]},]
+    # )
+    # for x in r['TransitGatewayAttachments']:
+    #     name = ''
+    #     for t in x['Tags']:
+    #         if t['Key'] == 'Name':
+    #             name = t['Value']
+    #     association_id = ''
+    #     associated = False
+    #     association_type = ''
+    #     if 'Association' in x.keys():
+    #         association_id = x['Association']['TransitGatewayRouteTableId']
+    #         associated = (x['Association']['State'] == 'associated')
+    #         association_type = 'TransitGatewayRouteTable'
+    #     self.attachments.append(
+    #         AwsTransitGatewayAttachment(
+    #             id = x['TransitGatewayAttachmentId'],
+    #             name = name,
+    #             resource_id = x['ResourceId'],
+    #             resource_type = x['ResourceType'],
+    #             association_type = 'TransitGatewayRouteTable',
+    #             association_id = association_id,
+    #             associated = associated
+    #         )
+    #     )
+
 
             # self.route_tables = []
             # r = self.client.describe_transit_gateway_route_tables(
