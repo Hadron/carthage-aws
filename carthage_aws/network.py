@@ -52,90 +52,61 @@ class AwsVirtualPrivateCloud(AwsManaged):
             self.id = c_aws.vpc_id
 
         if not (self.name or self.id):
-            breakpoint()
             raise ValueError("You must specify either an AWS VPC ID or VPC name.")
 
         self.groups = []
 
-    def make_ig():
-        if make_ig:
-            ig = self.connection.client.create_internet_gateway()
-            self.ig = ig['InternetGateway']['InternetGatewayId']
-            self.connection.client.attach_internet_gateway(InternetGatewayId=self.ig, VpcId=self.id)
-            self.connection.client.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=self.ig, RouteTableId=self.main_route_table_id)
-            sg = self.connection.client.create_security_group(GroupName=f'{self.name} open', VpcId=self.id, Description=f'{self.name} open')
-            self.groups.append(sg)
-
-            self.connection.client.authorize_security_group_ingress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
-                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
-            ])
-            self.connection.client.authorize_security_group_egress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
-                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
-            ])
-
     def do_create(self):
-        try:
-            r = self.connection.client.create_vpc(
-                    InstanceTenancy='default',
-                    # CidrBlock=str(self.config_layout.aws.vpc_cidr), 
-                    CidrBlock=self.cidrblock, 
-                    TagSpecifications=[self.resource_tags])
-            self.id = r['Vpc']['VpcId']
-            
-            make_ig = False
-            for ig in self.connection.igs:
-                if ig['vpc'] == self.id:
-                    make_ig = False
-                    break
-
-        except ClientError as e:
-            logger.error(f'Could not create AWS VPC {self.name} due to {e}.')
+        r = self.connection.client.create_vpc(
+                InstanceTenancy='default',
+                CidrBlock=self.cidrblock, 
+                TagSpecifications=[self.resource_tags])
+        self.id = r['Vpc']['VpcId']
 
     @property
     def route_tables(self):
-        return [ x for x in self.mob.route_tables.all() ]
+        return [ self.ainjector(AwsRouteTable, id=x.id) for x in self.mob.route_tables.all() ]
 
     @property
     def subnets(self):
         return [ x for x in self.mob.subnets.all() ]
 
-    @memoproperty
-    def main_route_table_id(self):
+    async def main_route_table(self):
         r = self.connection.client.describe_route_tables(
             Filters=[
                 dict(Name='vpc-id', Values=[self.id]),
                 dict(Name='association.main',
                      Values=['true'])])
-        return r['RouteTables'][0]['RouteTableId']
+        rid = r['RouteTables'][0]['RouteTableId']
+        return await self.ainjector(AwsRouteTable, id=rid)
 
     async def post_create_hook(self):
-        for rt in self.mob.route_tables.all():
-            if len(rt.associations) > 0:
-                try:
-                    rt.associations[0].delete()
-                except ClientError as e:
-                    logger.error(f"Could not delete {rt} association because {e}")
-                try:
-                    rt.delete()
-                except ClientError as e:
-                    logger.error(f"Could not delete {rt} because {e}")
-        for sn in self.mob.subnets.all():
-            try:
-                sn.delete()
-            except ClientError as e:
-                logger.error(f"Could not delete {sn} because {e}")
 
-    
+        def callback():
+
+            rts = list(self.mob.route_tables.all())
+            assert len(rts) == 1
+            rt = rts[0]
+            rt.create_tags(Tags=[dict(Key='Name', Value=f'rt-{self.name}')])
+
+            sgs = list(self.mob.security_groups.all())
+            assert len(sgs) == 1
+            sg = sgs[0]
+            sg.create_tags(Tags=[dict(Key='Name', Value=f'sg-{self.name}')])
+
+            sg.revoke_ingress(IpPermissions=sg.ip_permissions)
+            sg.revoke_egress(IpPermissions=sg.ip_permissions_egress)
+            sg.authorize_ingress(IpPermissions=[{'IpProtocol': '-1', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]}])
+            sg.authorize_egress(IpPermissions=[{'IpProtocol': '-1', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]}])
+
+            sns = list(self.mob.subnets.all())
+            assert len(sns) == 0
+
+        await run_in_executor(callback)
+
     async def post_find_hook(self):
-        groups =self.connection.client.describe_security_groups(Filters=[
-            dict(Name='vpc-id', Values=[self.id])])
-
+        groups =self.connection.client.describe_security_groups(
+            Filters=[dict(Name='vpc-id', Values=[self.id])])
         self.groups = list(filter(lambda g: g['GroupName'] != "default", groups['SecurityGroups']))
         
     def delete(self):
@@ -172,15 +143,12 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
                     return await run_in_executor(self.find_from_id)
 
     def do_create(self):
-        try:
-            r = self.connection.client.create_subnet(
-                VpcId=self.vpc.id,
-                CidrBlock=str(self.network.v4_config.network),
-                TagSpecifications=[self.resource_tags]
-            )
-            self.id = r['Subnet']['SubnetId']
-        except ClientError as e:
-            logger.error(f'Could not create AWS subnet {self.name} due to {e}.')
+        r = self.connection.client.create_subnet(
+            VpcId=self.vpc.id,
+            CidrBlock=str(self.network.v4_config.network),
+            TagSpecifications=[self.resource_tags]
+        )
+        self.id = r['Subnet']['SubnetId']
 
     async def post_create_hook(self):
         return
@@ -221,7 +189,7 @@ class AwsSecurityGroup(AwsManaged):
         else:
             self.association = self.mob.associate_with_subnet(SubnetId=self.subnet.id)
 
-@inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud, _ready=True), subnet=InjectionKey(AwsSubnet, _ready=True))
+@inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud))
 class AwsRouteTable(AwsManaged):
 
     stamp_type = "route_table"
@@ -230,7 +198,7 @@ class AwsRouteTable(AwsManaged):
     def __init__(self,  **kwargs):
         super().__init__( **kwargs)
 
-        self.name = f'{self.subnet.name}-rt'
+        # self.name = f'{self.subnet.name}-rt'
 
     def _add_route(self, net, target, kind=None):
 
@@ -239,8 +207,6 @@ class AwsRouteTable(AwsManaged):
         if kind is None:
             if isinstance(target, AwsInternetGateway):
                 kind = 'Gateway'
-            elif isinstance(target, AwsTransitGateway):
-                kind = 'TransitGateway'
             elif isinstance(target, AwsTransitGateway):
                 kind = 'TransitGateway'
             elif getattr(target, 'interface_type', None) == 'interface':
@@ -300,7 +266,7 @@ class AwsRouteTable(AwsManaged):
         if len(self.mob.associations) > 0:
             self.association = self.mob.associations[0]
         else:
-            self.association = self.mob.associate_with_subnet(SubnetId=self.subnet.id)
+            pass # self.association = self.mob.associate_with_subnet(SubnetId=self.subnet.id)
 
 class AwsInternetGateway(AwsManaged):
     
@@ -309,28 +275,43 @@ class AwsInternetGateway(AwsManaged):
 
     def __init__(self,  **kwargs):
         super().__init__( **kwargs)
+        self.attachment_id = None
 
-    async def attach(self, vpc):
-        if hasattr(self, 'attachment'):
-            logger.error(f"{self} already has attachment {self.attachment}")
-        else:
+    async def set_attachment(self, *, vpc=None, readonly=False):
+
+        if vpc: await vpc.async_become_ready()
+
+	# If they match, we are done.
+        if vpc and self.attachment_id and (vpc.id == self.attachment_id):
+            return
+
+        # If not, we start by deleting the current (incorrect)
+        # attachment.
+        if self.attachment_id:
+            if readonly:
+                raise ValueError(f'attachment for {self} is {self.attachment_id} instead of {vpc.id}')
             def callback():
-                r = self.mob.attach_to_vpc(VpcId=vpc.id)
-                setattr(self, 'attachment', r)
-                # logger.info(f"Attached {self.attachment} to {self}")
+                self.mob.detach_from_vpc(VpcId=self.attachment_id)
+                self.attachment_id = None
+            await run_in_executor(callback)
+            
+        # Set the correct attachment if requested.
+        if vpc.id:
+            if readonly:
+                raise ValueError(f'unable to attach {self} to {vpc.id}')
+            def callback():
+                self.mob.attach_to_vpc(VpcId=vpc.id)
+                self.attachment_id = vpc.id
             await run_in_executor(callback)
 
-    def detatch(self):
-        raise NotImplementedError
-        if hasattr(self, 'attachment'):
-            def callback():
-                logger.info(f"Detatching {self.attachment} from {self}")
-                _ = self.mob.detach_from_vpc(VpcId=self.vpc.id)
-                delattr(self, 'attachment')
-            run_in_executor(callback)
-        else:
-            logger.warn(f"{self} is not attached..ignoring detach command")
-
+    async def attach(self, vpc=None, readonly=False):
+        if not vpc:
+            vpc = await self.ainjector.get_instance_async(AwsVirtualPrivateCloud)
+        return await self.set_attachment(vpc=vpc, readonly=readonly)
+        
+    async def detach(self, readonly=False):
+        return await self.set_attachment(vpc=None, readonly=readonly)
+        
     def delete(self):
         raise NotImplementedError
         if hasattr(self, 'attachment'):
@@ -340,18 +321,16 @@ class AwsInternetGateway(AwsManaged):
         run_in_executor(callback)
 
     def do_create(self):
-        try:
-            r = self.connection.client.create_internet_gateway(
-                    TagSpecifications=[self.resource_tags]
-            )
-            self.id = r['InternetGateway']['InternetGatewayId']
-        except ClientError as e:
-            logger.error(f'Could not create AwsInternetGateway {self.name} due to {e}.')
+        r = self.connection.client.create_internet_gateway(
+                TagSpecifications=[self.resource_tags]
+        )
+        self.id = r['InternetGateway']['InternetGatewayId']
 
     async def post_find_hook(self): 
-        if hasattr(self.mob, 'attachments'):
-            if len(self.mob.attachments) > 0:
-                setattr(self, 'attachment', self.mob.attachments[0])
+        if len(getattr(self.mob, 'attachments', [])) > 0:
+            self.attachment_id = self.mob.attachments[0]['VpcId']
+        else:
+            self.attachment_id = None
 
 @inject_autokwargs(subnet=AwsSubnet)
 class AwsNetworkInterface(AwsManaged):

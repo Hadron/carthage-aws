@@ -47,10 +47,8 @@ class AwsHostedZone(AwsManaged):
         '''
         # we assume self.name has trailing dot as that is returned from the API
         if name.endswith('.'):
-            return name.endswith(self.name)
-        else:
-            return f'{name}.'.endswith(self.name)
-
+            name = name[:-1]
+        return name.endswith(self.name)
 
     def find_from_name(self):
         try:

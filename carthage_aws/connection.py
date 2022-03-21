@@ -25,7 +25,7 @@ resource_factory_methods = dict(
     instance='Instance',
     vpc='Vpc',
     subnet='Subnet',
-    volume='Volume'
+    volume='Volume',
     key_pair='KeyPair',
     route_table='RouteTable',
     table_association='RouteTableAssociation',
@@ -54,6 +54,7 @@ class AwsConnection(AsyncInjectable):
     def _setup(self):
         if not self.config.access_key_id: breakpoint()
         if not self.config.secret_access_key: breakpoint()
+        self.aws_access_key_id = self.config.access_key_id
         self.region = self.config.region
         self.connection = boto3.Session(
             aws_access_key_id=self.config.access_key_id,
@@ -219,6 +220,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
                 self.mob.load()
             else:
                 logger.warning(f'Failed to load {self}', exc_info=e)
+                breakpoint()
                 self.mob = None
                 if not self.readonly:
                     self.connection.invalid_ec2_resource(self.resource_type, self.id, name=self.name)
@@ -260,7 +262,8 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
 
         await self.ainjector(self.pre_create_hook)
         await run_in_executor(self.do_create)
-        assert self.mob or self.id
+        if not (self.mob or self.id):
+            raise RuntimeError(f'created object for {self} provided neither mob nor id')
         if not self.mob:
             await self.find()
         else:

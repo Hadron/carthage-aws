@@ -75,93 +75,10 @@ class AwsTransitGateway(AwsManaged):
     def find_from_id(self):
         class mock: pass
         self.mob = mock()
-        try:
-            r = self.client.describe_transit_gateways(TransitGatewayIds=[self.id])
-            for t in r['TransitGateways'][0]['Tags']:
-                if t['Key'] == 'Name':
-                    self.name = t['Value']
-
-            # self.route_tables = []
-            # r = self.client.describe_transit_gateway_route_tables(
-            #     Filters=[{'Name': 'transit-gateway-id','Values': [self.id,]},]
-            # )
-            # for x in r['TransitGatewayRouteTables']:
-            #     name = ''
-            #     for t in x['Tags']:
-            #         if t['Key'] == 'Name':
-            #             name = t['Value']
-            #     associated = False
-            #     association_id = ''
-            #     association_type = ''
-            #     association = None
-            #     for a in self.attachments:
-            #         if x['TransitGatewayRouteTableId'] == a.association_id:
-            #             associated = True
-            #             association_id = a.id
-            #             association_type = 'TransitGatewayAttachment'
-            #             association = a
-            #             break
-            #     self.route_tables.append(
-            #         AwsTransitGatewayRouteTable(
-            #             id = x['TransitGatewayRouteTableId'],
-            #             name = name,
-            #             associated = associated,
-            #             association_id = association_id,
-            #             association_type = association_type,
-            #             association = association
-            #         )
-            #     )
-            # for x in self.route_tables:
-            #     local = ''
-            #     if x.association_id != '':
-            #         local = x.association.id
-            #         for a in self.attachments:
-            #             if x.association.association_id == a.association_id:
-            #                 a.association = x
-            #     r = self.client.search_transit_gateway_routes(
-            #         TransitGatewayRouteTableId=x.id,
-            #         Filters=[{'Name': 'state','Values': ['active',]},]
-            #     )
-            #     for y in r['Routes']:
-            #         if local == y['TransitGatewayAttachments'][0]['TransitGatewayAttachmentId']:
-            #             x.local_routes.append(
-            #                 AwsTransitGatewayRoute(
-            #                     cidrblock = y['DestinationCidrBlock'],
-            #                     attachments = y['TransitGatewayAttachments'],
-            #                     # FIXME: assuming len(y['TransitGatewayAttachments']) == 1 here may not be thorough
-            #                     resource_id = y['TransitGatewayAttachments'][0]['ResourceId'],
-            #                     attachment_id = y['TransitGatewayAttachments'][0]['TransitGatewayAttachmentId'],
-            #                     resource_type = y['TransitGatewayAttachments'][0]['ResourceType'],
-            #                     route_type = y['Type'],
-            #                     state = y['State']
-            #                 )
-            #             )
-            #         else:
-            #             x.foreign_routes.append(
-            #                 AwsTransitGatewayRoute(
-            #                     cidrblock = y['DestinationCidrBlock'],
-            #                     attachments = y['TransitGatewayAttachments'],
-            #                     # FIXME: assuming len(y['TransitGatewayAttachments']) == 1 here may not be thorough
-            #                     resource_id = y['TransitGatewayAttachments'][0]['ResourceId'],
-            #                     attachment_id = y['TransitGatewayAttachments'][0]['TransitGatewayAttachmentId'],
-            #                     resource_type = y['TransitGatewayAttachments'][0]['ResourceType'],
-            #                     route_type = y['Type'],
-            #                     state = y['State']
-            #                 )
-            #             )
-            #         x.routes = x.local_routes + x.foreign_routes
-            # for a in self.attachments:
-            #     r = self.client.get_transit_gateway_attachment_propagations(TransitGatewayAttachmentId=a.id)['TransitGatewayAttachmentPropagations']
-            #     for p in r:
-            #         if a.association:
-            #             if p['TransitGatewayRouteTableId'] != a.association.id:
-            #                 for t in self.route_tables:
-            #                     if t.id == p['TransitGatewayRouteTableId']:
-            #                         table = t
-            #                 a.propagations.append(t)
-                
-        except ClientError as e:
-            logger.error(f'Could not find TransitGateway for {self.id} by id because {e}.')
+        r = self.client.describe_transit_gateways(TransitGatewayIds=[self.id])
+        for t in r['TransitGateways'][0]['Tags']:
+            if t['Key'] == 'Name':
+                self.name = t['Value']
         return self.mob
     
     async def find(self):
@@ -373,36 +290,39 @@ class AwsTransitGatewayAttachment(AwsManaged):
     #         )
     #     )
 
+    async def foreign_attachment(self, attachment):
+        def callback():
+            r = self.client.accept_transit_gateway_vpc_attachment(TransitGatewayAttachmentId=attachment.id)
+        await run_in_executor(callback)
+
     def do_create(self):
         class mock: pass
         self.mob = mock()
-        try:
-            r = self.client.create_transit_gateway_vpc_attachment(
-                TransitGatewayId=self.tgw.id,
-                VpcId=self.vpc.id,
-                SubnetIds=[
-                    self.subnet.id,
-                ],
-                Options={
-                    'DnsSupport': 'disable',
-                    'Ipv6Support': 'disable',
-                    'ApplianceModeSupport': 'disable'
+        self.mob.id = None
+        r = self.client.create_transit_gateway_vpc_attachment(
+            TransitGatewayId=self.tgw.id,
+            VpcId=self.vpc.id,
+            SubnetIds=[
+                self.subnet.id,
+            ],
+            Options={
+                'DnsSupport': 'disable',
+                'Ipv6Support': 'disable',
+                'ApplianceModeSupport': 'disable'
+            },
+            TagSpecifications=[
+                {
+                    'ResourceType': 'transit-gateway-attachment',
+                    'Tags': [
+                        {
+                            'Key': 'Name',
+                            'Value': self.name
+                        },
+                    ]
                 },
-                TagSpecifications=[
-                    {
-                        'ResourceType': 'transit-gateway-attachment',
-                        'Tags': [
-                            {
-                                'Key': 'Name',
-                                'Value': self.name
-                            },
-                        ]
-                    },
-                ]
-            )['TransitGatewayVpcAttachment']
-            self.id = r['TransitGatewayAttachmentId']
-        except ClientError as e:
-            logger.error(f'Could not create TransitGatewayAttachment for {self.id} because {e}.')
+            ]
+        )['TransitGatewayVpcAttachment']
+        self.id = r['TransitGatewayAttachmentId']
         return self.mob
         
     async def post_find_hook(self):
