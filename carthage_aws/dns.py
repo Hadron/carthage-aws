@@ -45,11 +45,11 @@ class AwsHostedZone(AwsManaged):
         '''
         Returns `bool` representing whether or not zone should contain name
         '''
-        # we assume self.name has trailing dot as that is returned from the API
+        # we trim the trailing dot that is returned from the API
+        # so we just trim the dot on the fqdn we are passed if it has one
         if name.endswith('.'):
-            return name.endswith(self.name)
-        else:
-            return f'{name}.'.endswith(self.name)
+            name = name[:-1]
+        return name.endswith(self.name)
 
 
     def find_from_name(self):
