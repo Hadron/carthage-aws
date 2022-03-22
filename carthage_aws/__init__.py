@@ -25,8 +25,8 @@ __all__ += ['AwsHostedZone', 'AwsDnsManagement']
 from .vm import AwsVm, MaybeLocalAwsVm
 __all__ += ['AwsVm', 'MaybeLocalAwsVm']
 
-from .image import image_provider, debian_ami_owner, ImageBuilderVolume, AttachImageBuilderVolume
-__all__ += ['image_provider', 'debian_ami_owner', 'AttachImageBuilderVolume', 'ImageBuilderVolume']
+from .image import image_provider, debian_ami_owner, ImageBuilderVolume, AttachImageBuilderVolume, build_ami
+__all__ += ['image_provider', 'debian_ami_owner', 'AttachImageBuilderVolume', 'ImageBuilderVolume', 'build_ami']
 
 from .ebs import AwsVolume
 __all__ += ['AwsVolume']

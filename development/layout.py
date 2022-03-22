@@ -8,6 +8,7 @@
 import os.path
 from carthage import *
 from carthage_aws import *
+from carthage_aws.connection import run_in_executor
 from carthage_base import *
 from carthage.modeling import *
 from carthage.cloud_init import WriteAuthorizedKeysPlugin
@@ -20,12 +21,21 @@ async def dev_layout(injector):
         layout_name = 'aws_development'
         config = base_injector(ConfigLayout)
 
+        async def register_carthage_debian(self):
+            await self.ainjector(
+                build_ami,
+                name="Carthage-Debian",
+                add_time_to_name=True)
+            
         add_provider(DebianImage)
         add_provider(machine_implementation_key, MaybeLocalAwsVm)
         add_provider(InjectionKey(AwsHostedZone),
                      when_needed(AwsHostedZone, name=config.developer.domain))
         add_provider(WriteAuthorizedKeysPlugin, allow_multiple=True)
-        aws_ami = "ami-06ed7917b75fcaf17"
+        add_provider(InjectionKey("aws_ami"),
+                     image_provider(name='Carthage-Debian*',
+                                    fallback=image_provider(owner=debian_ami_owner, name='debian-11-amd64-20220310-944')))
+        
         domain = "autotest.photon.ac"
         class our_net(NetworkModel):
             v4_config = V4Config(network="192.168.100.0/24")
@@ -45,13 +55,18 @@ async def dev_layout(injector):
             layout_source = os.path.dirname(__file__)
             layout_destination = "carthage_aws"
             aws_image_size = 8
-            attach_image_volume = AttachImageBuilderVolume
             
             class install_software(MachineCustomization):
                 @setup_task("Install useful software")
                 async def install(self):
-                    await self.ssh("apt -y install emacs-nox mailutils-",
+                    await self.ssh("apt -y install emacs-nox mailutils- python3-boto3",
                                    _bg=True,
                                    _bg_exc=False)
+            
+
+                    
+        class other(MachineModel):
+            cloud_init = True
+            aws_instance_type = 't3.micro'
 
     return await ainjector(layout)
