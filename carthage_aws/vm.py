@@ -13,10 +13,9 @@ from ipaddress import IPv4Address
 from carthage import *
 from carthage.modeling import *
 from carthage.dependency_injection import *
-from carthage.vm import vm_image
-from carthage.config import ConfigLayout
 from carthage.machine import Machine
 from carthage.network import NetworkConfig, NetworkLink
+from carthage.local import LocalMachineMixin
 from carthage.cloud_init import generate_cloud_init_cloud_config
 
 import boto3
@@ -52,6 +51,7 @@ class AwsVm(AwsManaged, Machine):
                     adl_keys=[InjectionKey(NetworkLink, host=self.name)])
                 
         updated_links = []
+        update_ip_address = False
         if self.__class__.ip_address is Machine.ip_address:
             try:
                 self.ip_address
@@ -205,4 +205,21 @@ class AwsVm(AwsManaged, Machine):
         
     stamp_type = 'vm'
     resource_type = 'instance'
-    
+
+@inject()
+class  LocalAwsVm(LocalMachineMixin, AwsVm): pass
+
+__all__ += ['LocalAwsVm']
+
+try:
+    import carthage_base.hosted
+    class MaybeLocalAwsVm(carthage_base.hosted.BareOrLocal):
+        implementation = LocalAwsVm
+        remote_implementation = AwsVm
+
+except ImportError:
+    class MaybeLocalAwsVm(Injectable):
+        def __new__(cls, *args, **kwargs):
+            raise NotImplementedError('MaybeLocalAwsVm requires carthage_base available')
+
+__all__ += ['MabyLocalAwsVm']
