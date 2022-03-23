@@ -36,7 +36,7 @@ async def dev_layout(injector):
         domain = config.developer.domain
 
         @dynamic_name(config.developer.machine)
-        class dev(CarthageServerRole, MachineModel):
+        class dev(CarthageServerRole, MachineModel, AsyncInjectable):
             cloud_init = True
             aws_instance_type = 't3.medium'
             name = config.developer.machine
