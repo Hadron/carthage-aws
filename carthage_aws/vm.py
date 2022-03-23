@@ -185,6 +185,7 @@ class AwsVm(AwsManaged, Machine):
             if not self.running:
                 return
             await run_in_executor(self.mob.stop)
+            await run_in_executor(self.mob.wait_until_stopped)
             if self._clear_ip_address:
                 del self.ip_address
             self.running = False
