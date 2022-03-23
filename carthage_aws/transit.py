@@ -3,28 +3,22 @@ import asyncio
 from carthage import *
 from carthage.dependency_injection import *
 from carthage.utils import memoproperty
-from carthage_aws.connection import AwsConnection, AwsManaged, run_in_executor
+from carthage_aws.connection import AwsConnection, AwsManaged, AwsManagedClient, run_in_executor
 from carthage_aws.network import AwsVirtualPrivateCloud, AwsSubnet
 
 from dataclasses import dataclass, field
 
 from botocore.exceptions import ClientError
 
-class AwsTransitGateway(AwsManaged):
+class AwsTransitGateway(AwsManagedClient):
 
     resource_type = 'transit_gateway'
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.client = self.service_resource
         self.attachments = {}
         self.route_tables = {}
-
-    @memoproperty
-    def service_resource(self):
-        # override because ec2 resource does not support transit gateway
-        return self.connection.connection.client('ec2', region_name=self.connection.region)
 
     async def associate(self, attachment, table):
         await self.route_tables[table.id].associate(self.attachments[attachment.id])
@@ -127,7 +121,7 @@ class AwsTransitGatewayRoute:
         return f'<{self.__class__.__name__}: cidrblock: {self.cidrblock}>'
 
 @inject_autokwargs(tgw=AwsTransitGateway)
-class AwsTransitGatewayRouteTable(AwsManaged):
+class AwsTransitGatewayRouteTable(AwsManagedClient):
 
     resource_type = 'transit_gateway_route_table'
 
@@ -219,14 +213,6 @@ class AwsTransitGatewayRouteTable(AwsManaged):
         self.mob = self
         return self.mob
 
-    def find_from_id(self):
-        r = self.client.describe_transit_gateway_route_tables(TransitGatewayRouteTableIds=[self.id])
-        for t in r['TransitGatewayRouteTables'][0]['Tags']:
-            if t['Key'] == 'Name':
-                self.name = t['Value']
-        self.mob = self
-        return self.mob
-        
     async def post_find_hook(self):
         while True:
             r = self.client.describe_transit_gateway_route_tables(TransitGatewayRouteTableIds=[self.id])
@@ -237,20 +223,15 @@ class AwsTransitGatewayRouteTable(AwsManaged):
         self.tgw.route_tables[self.id] = self
 
 @inject_autokwargs(tgw=AwsTransitGateway, vpc=AwsVirtualPrivateCloud, subnet=AwsSubnet)
-class AwsTransitGatewayAttachment(AwsManaged):
+class AwsTransitGatewayAttachment(AwsManagedClient):
 
     resource_type = 'transit_gateway_attachment'
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.client = self.service_resource
         self.association = None
         # self.propagations = []
-
-    @memoproperty
-    def service_resource(self):
-        return self.connection.connection.client('ec2', region_name=self.connection.region)
         
     def do_create(self):
         r = self.client.create_transit_gateway_vpc_attachment(
@@ -271,15 +252,6 @@ class AwsTransitGatewayAttachment(AwsManaged):
         return self.mob
         
     async def post_find_hook(self):
-        while True:
-            r = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[self.id])
-            state = r['TransitGatewayAttachments'][0]['State']
-            if state in ['available', 'pendingAcceptance']: break
-            print(f'waiting on tgw_attach: {self}')
-            await asyncio.sleep(5)
-        self.tgw.attachments[self.id] = self
-
-    def find_from_id(self):
         try:
             r = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[self.id])['TransitGatewayAttachments'][0]
             self.attached_resource_type = r['ResourceType']
@@ -291,5 +263,11 @@ class AwsTransitGatewayAttachment(AwsManaged):
             #     },
         except ClientError as e:
             logger.error(f'Could not find TransitGatewayAttachment for {self.id} by id because {e}.')
-        self.mob = self
-        return self.mob
+
+        while True:
+            r = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[self.id])
+            state = r['TransitGatewayAttachments'][0]['State']
+            if state in ['available', 'pendingAcceptance']: break
+            print(f'waiting on tgw_attach: {self}')
+            await asyncio.sleep(5)
+        self.tgw.attachments[self.id] = self
