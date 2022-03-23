@@ -383,7 +383,7 @@ class AwsManagedClient(AwsManaged):
 
     async def delete(self):
         def callback():
-            r = getattr(self.client, f'delete_{self.resource_type}', {f'{self.resource_name}Ids':[self.id]})
+            r = getattr(self.client, f'delete_{self.resource_type}').__call__(**{f'{self.resource_name}Ids':[self.id]})
         await run_in_executor(callback)
 
     def find_from_id(self):
