@@ -17,7 +17,15 @@ import boto3
 from botocore.exceptions import ClientError
 from ipaddress import IPv4Network
 
-__all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet', 'AwsInternetGateway', 'AwsRouteTable', 'AwsNetworkInterface']
+__all__ = [
+    'AwsVirtualPrivateCloud',
+    'AwsSubnet',
+    'AwsInternetGateway',
+    'AwsRouteTable',
+    'AwsNetworkInterface',
+    'AwsCustomerGateway',
+    'AwsVpnGateway'
+]
 
 class AwsVirtualPrivateCloud(AwsManaged):
 
@@ -383,24 +391,54 @@ class AwsNetworkInterface(AwsManaged):
         if self.disable_src_dst_check:
             self.mob.modify_attribute(SourceDestCheck={'Value':False})
 
-@inject_autokwargs()
 class AwsCustomerGateway(AwsManagedClient):
 
     resource_type = 'customer_gateway'
 
-    def __init__(self, **kwargs):
+    def __init__(self, name, public_ipv4, asn=65000, **kwargs):
         super().__init__(**kwargs)
+        self.asn = asn
+        self.name = name
+        self.public_ipv4 = public_ipv4
+
+    async def create_vpn(self, gw):
+        '''Provided an AwsTransitGateway or AwsVpnGateway, create a vpn endpoint'''
+        resource_name = f'{gw.resource_name}Id'
+
+        kwargs = dict(
+            resource_name=gw.id,
+            CustomerGatewayId=self.id,
+            Type='ipsec.1',
+            Options=dict(
+               EnableAcceleration=False,
+               StaticRoutesOnly=False,
+               TunnelInsideIpVersion='ipv4',
+               TagSpecifications=[self.resource_tags]
+            )
+        )
+        def callback():
+            r = self.client.create_vpn_connection(**kwargs)
+        await run_in_executor(callback)
+
 
     def do_create(self):
-        r = client.create_customer_gateway(
-            BgpAsn=self.asn,
+        r = self.client.create_customer_gateway(
+            BgpAsn=int(self.asn),
             PublicIp=self.public_ipv4,
             Type='ipsec.1',
             TagSpecifications=[self.resource_tags],
-            DeviceName='string',
+            DeviceName=self.name,
         )
+        breakpoint()
+        self.mob = self
+        return self.mob
 
-@inject_autokwargs()
+    def find_from_id(self):
+        pass
+        self.mob = self
+        return self.mob
+
+
 class AwsVpnGateway(AwsManagedClient):
 
     resource_type = 'vpn_gateway'
@@ -409,10 +447,58 @@ class AwsVpnGateway(AwsManagedClient):
         super().__init__(**kwargs)
 
     def do_create(self):
-        r = client.create_customer_gateway(
-            BgpAsn=self.asn,
-            PublicIp=self.public_ipv4,
+        pass
+    #     r = self.client.create_customer_gateway(
+    #         BgpAsn=self.asn,
+    #         PublicIp=self.public_ipv4,
+    #         Type='ipsec.1',
+    #         TagSpecifications=[self.resource_tags],
+    #         DeviceName='string',
+    #     )
+
+@inject_autokwargs(cust_gw=AwsCustomerGateway)
+class AwsVpnConnection(AwsManagedClient):
+    
+    resource_type = 'vpn_connection'
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    async def create_vpn(self, gw):
+        '''Provided an AwsTransitGateway or AwsVpnGateway, create a vpn endpoint'''
+        resource_name = f'{gw.resource_name}Id'
+
+        kwargs = dict(
+            resource_name=gw.id,
+            CustomerGatewayId=self.cust_gw.id,
             Type='ipsec.1',
-            TagSpecifications=[self.resource_tags],
-            DeviceName='string',
+            Options=dict(
+               EnableAcceleration=False,
+               StaticRoutesOnly=False,
+               TunnelInsideIpVersion='ipv4',
+               TagSpecifications=[self.resource_tags]
+            )
         )
+        def callback():
+            r = self.client.create_vpn_connection(**kwargs)
+        await run_in_executor(callback)
+
+    def do_create(self):
+        resource_name = f'{self.provided_gw.resource_name}Id'
+
+        kwargs = dict(
+            resource_name=self.provided_gw.id,
+            CustomerGatewayId=self.cust_gw.id,
+            Type='ipsec.1',
+            Options=dict(
+               EnableAcceleration=False,
+               StaticRoutesOnly=False,
+               TunnelInsideIpVersion='ipv4',
+               TagSpecifications=[self.resource_tags]
+            )
+        )
+        self.mob = self
+        return self.mob
+
+    async def post_find_hook(self):
+        pass
