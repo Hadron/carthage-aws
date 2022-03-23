@@ -313,3 +313,14 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         p = p.joinpath("aws_stamps", self.stamp_type+".stamps")
         os.makedirs(p, exist_ok=True)
         return p
+
+class AwsManagedClient(AwsManaged):
+    @memoproperty
+    def client(self):
+        return self.connection.client(self.client_type, self.connection.region_name)
+
+    def find_from_id(self):
+        self.mob = self
+        resource_name = "".join([x.title() for x in resource_type.split('-')])
+        r = getattr(self.client, f'describe_{self.resource_type}', {f'{resource_name}Ids':[self.id]})
+        return self.mob
