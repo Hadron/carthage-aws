@@ -1,3 +1,6 @@
 name: carthage_aws
 package: carthage_aws
 python: .
+config:
+  plugins:
+  - https://github.com/hadron/carthage_base

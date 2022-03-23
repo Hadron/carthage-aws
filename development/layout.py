@@ -20,7 +20,8 @@ async def dev_layout(injector):
         layout_name = 'aws_development'
         config = base_injector(ConfigLayout)
 
-        add_provider(machine_implementation_key, dependency_quote(AwsVm))
+        add_provider(DebianImage)
+        add_provider(machine_implementation_key, MaybeLocalAwsVm)
         add_provider(InjectionKey(AwsHostedZone),
                      when_needed(AwsHostedZone, name=config.developer.domain))
         add_provider(WriteAuthorizedKeysPlugin, allow_multiple=True)
