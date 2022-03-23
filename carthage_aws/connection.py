@@ -22,20 +22,74 @@ from botocore.exceptions import ClientError
 __all__ = ['AwsConnection', 'AwsManaged']
 
 resource_factory_methods = dict(
+    capacity_reservation='CapacityReservation',
+    client_vpn_endpoint='ClientVpnEndpoint',
+    customer_gateway='CustomerGateway',
+    carrier_gateway='CarrierGateway',
+    dedicated_host='DedicatedHost',
+    dhcp_options='DhcpOptions',
+    egress_only_internet_gateway='EgressOnlyInternetGateway',
+    elastic_ip='ElasticIp',
+    elastic_gpu='ElasticGpu',
+    export_image_task='ExportImageTask',
+    export_instance_task='ExportInstanceTask',
+    fleet='Fleet',
+    fpga_image='FpgaImage',
+    host_reservation='HostReservation',
+    image='Image',
+    import_image_task='ImportImageTask',
+    import_snapshot_task='ImportSnapshotTask',
     instance='Instance',
-    vpc='Vpc',
-    subnet='Subnet',
-    volume='Volume',
-    key_pair='KeyPair',
-    route_table='RouteTable',
-    table_association='RouteTableAssociation',
+    instance_event_window='InstanceEventWindow',
     internet_gateway='InternetGateway',
-    nat_gateway='NatGateway',
+    ipam='Ipam',
+    ipam_pool='IpamPool',
+    ipam_scope='IpamScope',
+    ipv4pool_ec2='Ipv4PoolEc2',
+    ipv6pool_ec2='Ipv6PoolEc2',
+    key_pair='KeyPair',
+    launch_template='LaunchTemplate',
+    local_gateway='LocalGateway',
+    local_gateway_route_table='LocalGatewayRouteTable',
+    local_gateway_virtual_interface='LocalGatewayVirtualInterface',
+    local_gateway_virtual_interface_group='LocalGatewayVirtualInterfaceGroup',
+    local_gateway_route_table_vpc_association='LocalGatewayRouteTableVpcAssociation',
+    local_gateway_route_table_virtual_interface_group_association='LocalGatewayRouteTableVirtualInterfaceGroupAssociation',
+    natgateway='Natgateway',
+    network_acl='NetworkAcl',
     network_interface='NetworkInterface',
+    network_insights_analysis='NetworkInsightsAnalysis',
+    network_insights_path='NetworkInsightsPath',
+    network_insights_access_scope='NetworkInsightsAccessScope',
+    network_insights_access_scope_analysis='NetworkInsightsAccessScopeAnalysis',
+    placement_group='PlacementGroup',
+    prefix_list='PrefixList',
+    replace_root_volume_task='ReplaceRootVolumeTask',
+    reserved_instances='ReservedInstances',
+    route_table='RouteTable',
+    security_group='SecurityGroup',
+    security_group_rule='SecurityGroupRule',
+    snapshot='Snapshot',
+    spot_fleet_request='SpotFleetRequest',
+    spot_instances_request='SpotInstancesRequest',
+    subnet='Subnet',
+    subnet_cidr_reservation='SubnetCidrReservation',
+    traffic_mirror_filter='TrafficMirrorFilter',
+    traffic_mirror_session='TrafficMirrorSession',
+    traffic_mirror_target='TrafficMirrorTarget',
     transit_gateway='TransitGateway',
     transit_gateway_attachment='TransitGatewayAttachment',
+    transit_gateway_connect_peer='TransitGatewayConnectPeer',
+    transit_gateway_multicast_domain='TransitGatewayMulticastDomain',
     transit_gateway_route_table='TransitGatewayRouteTable',
-    transit_gateway_route_table_association='TransitGatewayRouteTableAssociation',
+    volume='Volume',
+    vpc='Vpc',
+    vpc_endpoint='VpcEndpoint',
+    vpc_endpoint_service='VpcEndpointService',
+    vpc_peering_connection='VpcPeeringConnection',
+    vpn_connection='VpnConnection',
+    vpn_gateway='VpnGateway',
+    vpc_flow_log='VpcFlowLog'
 )
 
 async def run_in_executor(func, *args):
@@ -315,12 +369,20 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         return p
 
 class AwsManagedClient(AwsManaged):
+
+    client_type = 'ec2'
+
     @memoproperty
     def client(self):
         return self.connection.client(self.client_type, self.connection.region_name)
 
+    async def delete(self):
+        def callback():
+            r = getattr(self.client, f'delete_{self.resource_type}', {f'{resource_name}Ids':[self.id]})
+        await run_in_executor(callback)
+
     def find_from_id(self):
-        self.mob = self
         resource_name = "".join([x.title() for x in resource_type.split('-')])
-        r = getattr(self.client, f'describe_{self.resource_type}', {f'{resource_name}Ids':[self.id]})
+        r = getattr(self.client, f'describe_{self.resource_type}s', {f'{resource_name}Ids':[self.id]})
+        self.mob = self
         return self.mob
