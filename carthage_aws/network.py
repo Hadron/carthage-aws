@@ -11,7 +11,7 @@ from carthage.network import TechnologySpecificNetwork, this_network
 from carthage.config import ConfigLayout
 from carthage.modeling import NetworkModel
 
-from .connection import AwsConnection, AwsManaged, run_in_executor
+from .connection import AwsConnection, AwsManaged, AwsManagedClient, run_in_executor
 
 import boto3
 from botocore.exceptions import ClientError
@@ -382,3 +382,37 @@ class AwsNetworkInterface(AwsManaged):
     async def post_create_hook(self):
         if self.disable_src_dst_check:
             self.mob.modify_attribute(SourceDestCheck={'Value':False})
+
+@inject_autokwargs()
+class AwsCustomerGateway(AwsManagedClient):
+
+    resource_type = 'customer_gateway'
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def do_create(self):
+        r = client.create_customer_gateway(
+            BgpAsn=self.asn,
+            PublicIp=self.public_ipv4,
+            Type='ipsec.1',
+            TagSpecifications=[self.resource_tags],
+            DeviceName='string',
+        )
+
+@inject_autokwargs()
+class AwsVpnGateway(AwsManagedClient):
+
+    resource_type = 'vpn_gateway'
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def do_create(self):
+        r = client.create_customer_gateway(
+            BgpAsn=self.asn,
+            PublicIp=self.public_ipv4,
+            Type='ipsec.1',
+            TagSpecifications=[self.resource_tags],
+            DeviceName='string',
+        )
