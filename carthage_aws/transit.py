@@ -18,11 +18,40 @@ class AwsTransitGateway(AwsManaged):
         super().__init__(**kwargs)
 
         self.client = self.service_resource
+        self.attachments = {}
+        self.route_tables = {}
 
     @memoproperty
     def service_resource(self):
         # override because ec2 resource does not support transit gateway
         return self.connection.connection.client('ec2', region_name=self.connection.region)
+
+    async def associate(self, attachment, table):
+        await self.route_tables[table.id].associate(self.attachments[attachment.id])
+
+    async def propagate(self, attachment, table):
+        await self.route_tables[table.id].propagate(self.attachments[attachment.id])
+
+    async def create_route_table(self, name):
+        pass
+
+    async def create_route(self, cidrblock, attachment, table):
+        await self.route_tables[table.id].create_route(cidrblock, attachment)
+
+    async def disassociate(self, attachment, table):
+        await self.route_tables[table.id].disassociate(self.attachments[attachment.id])
+
+    async def depropagate(self, attachment, table):
+        await self.route_tables[table.id].depropagate(self.attachments[attachment.id])
+
+    async def delete_route_table(self, name):
+        pass
+
+    async def delete_route(self, cidrblock, attachment, tablename):
+        pass
+
+    async def create_attachment(self, attachment):
+        pass
 
     async def create_foreign_attachment(self, attachment):
         '''Args: AwsTransitGatewayAttachment'''
@@ -43,7 +72,6 @@ class AwsTransitGateway(AwsManaged):
         await run_in_executor(callback)
 
     def do_create(self):
-        self.mob = self
         try:
             r = self.client.create_transit_gateway(
                 Description='Created by Carthage',
@@ -65,6 +93,7 @@ class AwsTransitGateway(AwsManaged):
             self.asn = r['TransitGateway']['Options']['AmazonSideAsn']
         except ClientError as e:
             logger.error(f'Could not create TransitGatewayAttachment for {self.id} by id because {e}.')
+        self.mob = self
         return self.mob
 
     async def post_find_hook(self):
@@ -75,11 +104,11 @@ class AwsTransitGateway(AwsManaged):
             await asyncio.sleep(5)
 
     def find_from_id(self):
-        self.mob = self
         r = self.client.describe_transit_gateways(TransitGatewayIds=[self.id])
         for t in r['TransitGateways'][0]['Tags']:
             if t['Key'] == 'Name':
                 self.name = t['Value']
+        self.mob = self
         return self.mob
     
 @dataclass(repr=False)
@@ -100,7 +129,7 @@ class AwsTransitGatewayRoute:
 @inject_autokwargs(tgw=AwsTransitGateway)
 class AwsTransitGatewayRouteTable(AwsManaged):
 
-    resource_type = 'transit-gateway-route-table'
+    resource_type = 'transit_gateway_route_table'
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -180,7 +209,6 @@ class AwsTransitGatewayRouteTable(AwsManaged):
             logger.error(f'{e}')
         
     def do_create(self):
-        self.mob = self
         try:
             r = self.client.create_transit_gateway_route_table(
                 TransitGatewayId=self.tgw.id,
@@ -188,6 +216,15 @@ class AwsTransitGatewayRouteTable(AwsManaged):
             )
         except ClientError as e:
             logger.error(f'Could not create TransitGatewayAttachment for {self.id} because {e}.')
+        self.mob = self
+        return self.mob
+
+    def find_from_id(self):
+        r = self.client.describe_transit_gateway_route_tables(TransitGatewayRouteTableIds=[self.id])
+        for t in r['TransitGatewayRouteTables'][0]['Tags']:
+            if t['Key'] == 'Name':
+                self.name = t['Value']
+        self.mob = self
         return self.mob
         
     async def post_find_hook(self):
@@ -197,6 +234,7 @@ class AwsTransitGatewayRouteTable(AwsManaged):
             if state == 'available': break
             print(f'waiting on tgw_route_table: {self}')
             await asyncio.sleep(5)
+        self.tgw.route_tables[self.id] = self
 
 @inject_autokwargs(tgw=AwsTransitGateway, vpc=AwsVirtualPrivateCloud, subnet=AwsSubnet)
 class AwsTransitGatewayAttachment(AwsManaged):
@@ -215,7 +253,6 @@ class AwsTransitGatewayAttachment(AwsManaged):
         return self.connection.connection.client('ec2', region_name=self.connection.region)
         
     def do_create(self):
-        self.mob = self
         r = self.client.create_transit_gateway_vpc_attachment(
             TransitGatewayId=self.tgw.id,
             VpcId=self.vpc.id,
@@ -230,6 +267,7 @@ class AwsTransitGatewayAttachment(AwsManaged):
             TagSpecifications=[self.resource_tags]
         )['TransitGatewayVpcAttachment']
         self.id = r['TransitGatewayAttachmentId']
+        self.mob = self
         return self.mob
         
     async def post_find_hook(self):
@@ -239,9 +277,9 @@ class AwsTransitGatewayAttachment(AwsManaged):
             if state in ['available', 'pendingAcceptance']: break
             print(f'waiting on tgw_attach: {self}')
             await asyncio.sleep(5)
+        self.tgw.attachments[self.id] = self
 
     def find_from_id(self):
-        self.mob = self
         try:
             r = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[self.id])['TransitGatewayAttachments'][0]
             self.attached_resource_type = r['ResourceType']
@@ -253,4 +291,5 @@ class AwsTransitGatewayAttachment(AwsManaged):
             #     },
         except ClientError as e:
             logger.error(f'Could not find TransitGatewayAttachment for {self.id} by id because {e}.')
+        self.mob = self
         return self.mob
