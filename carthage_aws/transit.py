@@ -1,16 +1,20 @@
 import asyncio
+import time
+import logging
 
 from carthage import *
 from carthage.dependency_injection import *
 from carthage.utils import memoproperty
-from carthage_aws.connection import AwsConnection, AwsManaged, AwsManagedClient, run_in_executor
+from carthage_aws.connection import AwsConnection, AwsManaged, AwsClientManaged, run_in_executor
 from carthage_aws.network import AwsVirtualPrivateCloud, AwsSubnet
+
+from .utils import unpack
 
 from dataclasses import dataclass, field
 
 from botocore.exceptions import ClientError
 
-class AwsTransitGateway(AwsManagedClient):
+class AwsTransitGateway(AwsClientManaged):
 
     resource_type = 'transit_gateway'
 
@@ -55,7 +59,7 @@ class AwsTransitGateway(AwsManagedClient):
                 r = self.client.accept_transit_gateway_vpc_attachment(TransitGatewayAttachmentId=attachment.id)
             while state != 'available':
                 state = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[attachment.id])['TransitGatewayAttachments'][0]['State']
-                asyncio.sleep(5)
+                time.sleep(5)
                 print(f'waiting on {self} accepting foreign_attachment: {attachment}')
             r = self.client.create_tags(
                 Resources=[attachment.id],
@@ -87,7 +91,7 @@ class AwsTransitGateway(AwsManagedClient):
             self.asn = r['TransitGateway']['Options']['AmazonSideAsn']
         except ClientError as e:
             logger.error(f'Could not create TransitGatewayAttachment for {self.id} by id because {e}.')
-        self.mob = self
+        self.mob = unpack(r)
         return self.mob
 
     async def post_find_hook(self):
@@ -102,7 +106,7 @@ class AwsTransitGateway(AwsManagedClient):
         for t in r['TransitGateways'][0]['Tags']:
             if t['Key'] == 'Name':
                 self.name = t['Value']
-        self.mob = self
+        self.mob = unpack(r)
         return self.mob
     
 @dataclass(repr=False)
@@ -121,7 +125,7 @@ class AwsTransitGatewayRoute:
         return f'<{self.__class__.__name__}: cidrblock: {self.cidrblock}>'
 
 @inject_autokwargs(tgw=AwsTransitGateway)
-class AwsTransitGatewayRouteTable(AwsManagedClient):
+class AwsTransitGatewayRouteTable(AwsClientManaged):
 
     resource_type = 'transit_gateway_route_table'
 
@@ -210,7 +214,7 @@ class AwsTransitGatewayRouteTable(AwsManagedClient):
             )
         except ClientError as e:
             logger.error(f'Could not create TransitGatewayAttachment for {self.id} because {e}.')
-        self.mob = self
+        self.mob = unpack(r)
         return self.mob
 
     async def post_find_hook(self):
@@ -222,24 +226,29 @@ class AwsTransitGatewayRouteTable(AwsManagedClient):
             await asyncio.sleep(5)
         self.tgw.route_tables[self.id] = self
 
-@inject_autokwargs(tgw=AwsTransitGateway, vpc=AwsVirtualPrivateCloud, subnet=AwsSubnet)
-class AwsTransitGatewayAttachment(AwsManagedClient):
+@inject_autokwargs(tgw=AwsTransitGateway, vpc=AwsVirtualPrivateCloud)
+class AwsTransitGatewayAttachment(AwsClientManaged):
 
     resource_type = 'transit_gateway_attachment'
 
     def __init__(self, **kwargs):
+        if ('subnet' in kwargs) and ('subnets' in kwargs):
+            raise ValueError(f"call to AwsTransitGatewayAttachment should not specify both 'subnet' and 'subnets'")
+        elif ('subnet' in kwargs):
+            self.subnets = [kwargs.pop('subnet')]
+        elif ('subnets' in kwargs):
+            self.subnets = kwargs.pop('subnets')
+        else:
+            self.subnets = False
         super().__init__(**kwargs)
+        if self.subnets is False:
+            self.subnets = [self.injector.get_instance(AwsSubnet)]
 
-        self.association = None
-        # self.propagations = []
-        
     def do_create(self):
         r = self.client.create_transit_gateway_vpc_attachment(
             TransitGatewayId=self.tgw.id,
             VpcId=self.vpc.id,
-            SubnetIds=[
-                self.subnet.id,
-            ],
+            SubnetIds=[subnet.id for subnet in self.subnets],
             Options={
                 'DnsSupport': 'disable',
                 'Ipv6Support': 'disable',
@@ -248,26 +257,41 @@ class AwsTransitGatewayAttachment(AwsManagedClient):
             TagSpecifications=[self.resource_tags]
         )['TransitGatewayVpcAttachment']
         self.id = r['TransitGatewayAttachmentId']
-        self.mob = self
-        return self.mob
-        
-    async def post_find_hook(self):
+        self.cached = unpack(r)
+
+    def reload(self):
+        r = self.client.describe_transit_gateway_vpc_attachments(TransitGatewayAttachmentIds=[self.id])
+        r = r['TransitGatewayVpcAttachments'][0]
+        self.cached = unpack(r)
+
+    def _update_attachment_subnets(self):
+
         try:
-            r = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[self.id])['TransitGatewayAttachments'][0]
-            self.attached_resource_type = r['ResourceType']
-            self.attached_resource_id = r['ResourceId']
+            reqids = [s.id for s in self.subnets]
+            add = list(set(reqids) - set(self.cached.SubnetIds))
+            remove = list(set(self.cached.SubnetIds) - set(reqids))
+            if add or remove:
+                r = self.client.modify_transit_gateway_vpc_attachment(
+                    TransitGatewayAttachmentId=self.id,
+                    AddSubnetIds=add,
+                    RemoveSubnetIds=remove
+                )
 
-            # 'Association': {
-            #     'TransitGatewayRouteTableId': 'string',
-            #     'State': 'associating'|'associated'|'disassociating'|'disassociated'
-            #     },
-        except ClientError as e:
-            logger.error(f'Could not find TransitGatewayAttachment for {self.id} by id because {e}.')
+        finally:
+            self.reload()
 
+    def _wait_for_ready(self):
         while True:
             r = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[self.id])
             state = r['TransitGatewayAttachments'][0]['State']
             if state in ['available', 'pendingAcceptance']: break
-            print(f'waiting on tgw_attach: {self}')
-            await asyncio.sleep(5)
+            logging.info(f'waiting on tgw_attach: {self}')
+            time.sleep(5)
+
+    async def post_find_hook(self):
+        def callback():
+            self.reload()
+            self._wait_for_ready()
+            self._update_attachment_subnets()
         self.tgw.attachments[self.id] = self
+        await run_in_executor(callback)
