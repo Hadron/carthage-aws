@@ -16,6 +16,8 @@ from carthage import *
 from carthage.config import ConfigLayout
 from carthage.dependency_injection import *
 
+from .utils import unpack
+
 import boto3
 from botocore.exceptions import ClientError
 
@@ -366,7 +368,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         os.makedirs(p, exist_ok=True)
         return p
 
-class AwsManagedClient(AwsManaged):
+class AwsClientManaged(AwsManaged):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -381,6 +383,11 @@ class AwsManagedClient(AwsManaged):
     def client(self):
         return self.connection.connection.client(self.client_type, self.connection.region)
 
+    async def callback(func):
+        async def wrap(*args, **kwargs):
+            run_in_executor(func(*args, **kwargs))
+        return wrap
+
     async def delete(self):
         def callback():
             r = getattr(self.client, f'delete_{self.resource_type}').__call__(**{f'{self.resource_name}Ids':[self.id]})
@@ -388,8 +395,15 @@ class AwsManagedClient(AwsManaged):
 
     def find_from_id(self):
         r = getattr(self.client, f'describe_{self.resource_type}s').__call__(**{f'{self.resource_name}Ids':[self.id]})
-        for t in r[f'{self.resource_name}s'][0]['Tags']:
-            if t['Key'] == 'Name':
-                self.name = t['Value']
-        self.mob = self
+        if 'transit_gateway' in self.resource_type:
+            if r[f'{self.resource_name}s'][0]['State'] not in ['deleted', 'deleting']:
+                for t in r[f'{self.resource_name}s'][0]['Tags']:
+                    if t['Key'] == 'Name':
+                        self.name = t['Value']
+            else: return
+        else:
+            for t in r[f'{self.resource_name}s'][0]['Tags']:
+                if t['Key'] == 'Name':
+                    self.name = t['Value']
+        self.mob = unpack(r)
         return self.mob
