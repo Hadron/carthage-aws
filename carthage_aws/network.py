@@ -11,7 +11,7 @@ from carthage.network import TechnologySpecificNetwork, this_network
 from carthage.config import ConfigLayout
 from carthage.modeling import NetworkModel
 
-from .connection import AwsConnection, AwsManaged, AwsManagedClient, run_in_executor
+from .connection import AwsConnection, AwsManaged, AwsClientManaged, run_in_executor
 
 import boto3
 from botocore.exceptions import ClientError
@@ -22,9 +22,7 @@ __all__ = [
     'AwsSubnet',
     'AwsInternetGateway',
     'AwsRouteTable',
-    'AwsNetworkInterface',
-    'AwsCustomerGateway',
-    'AwsVpnGateway'
+    'AwsNetworkInterface'
 ]
 
 class AwsVirtualPrivateCloud(AwsManaged):
@@ -86,7 +84,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
                 dict(Name='association.main',
                      Values=['true'])])
         rid = r['RouteTables'][0]['RouteTableId']
-        return await self.ainjector(AwsRouteTable, id=rid)
+        return await self.ainjector(AwsRouteTable, id=rid, subnet=None)
 
     async def post_create_hook(self):
 
@@ -151,11 +149,14 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
                     return await run_in_executor(self.find_from_id)
 
     def do_create(self):
-        r = self.connection.client.create_subnet(
+        kwargs = dict(
             VpcId=self.vpc.id,
             CidrBlock=str(self.network.v4_config.network),
             TagSpecifications=[self.resource_tags]
         )
+        if self.network.az != None:
+            kwargs.update(dict(AvailabilityZone=self.network.az))
+        r = self.connection.client.create_subnet(**kwargs)
         self.id = r['Subnet']['SubnetId']
 
     async def post_create_hook(self):
@@ -197,7 +198,8 @@ class AwsSecurityGroup(AwsManaged):
         else:
             self.association = self.mob.associate_with_subnet(SubnetId=self.subnet.id)
 
-@inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud))
+@inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud),
+                   subnet=InjectionKey(AwsSubnet))
 class AwsRouteTable(AwsManaged):
 
     stamp_type = "route_table"
@@ -205,8 +207,6 @@ class AwsRouteTable(AwsManaged):
 
     def __init__(self,  **kwargs):
         super().__init__( **kwargs)
-
-        # self.name = f'{self.subnet.name}-rt'
 
     def _add_route(self, net, target, kind=None):
 
@@ -233,6 +233,11 @@ class AwsRouteTable(AwsManaged):
 
     async def add_route(self, cidrblock, target, target_type, exists_ok=False):
         await run_in_executor(self.add_route, cidrblock, target)
+
+    async def associate_subnet(self, subnet):
+        def callback():
+            self.mob.associate_with_subnet(SubnetId=subnet.id)
+        await run_in_executor(callback)
 
     async def set_routes(self, *routes, exists_ok=False):
         def callback(routes):
@@ -267,15 +272,14 @@ class AwsRouteTable(AwsManaged):
             logger.error(f'Could not create AwsRouteTable {self.name} due to {e}.')
 
     async def post_create_hook(self):
-        # self.association = self.mob.associate_with_subnet(SubnetId=self.subnet.id)
-        pass
+        self.association = self.mob.associate_with_subnet(SubnetId=self.subnet.id)
 
     async def post_find_hook(self): 
         if len(self.mob.associations) > 0:
             self.association = self.mob.associations[0]
         else:
-            pass # self.association = self.mob.associate_with_subnet(SubnetId=self.subnet.id)
-
+            self.association = self.mob.associate_with_subnet(SubnetId=self.subnet.id)
+        
 class AwsInternetGateway(AwsManaged):
     
     stamp_type = "internet_gateway"
@@ -390,115 +394,3 @@ class AwsNetworkInterface(AwsManaged):
     async def post_create_hook(self):
         if self.disable_src_dst_check:
             self.mob.modify_attribute(SourceDestCheck={'Value':False})
-
-class AwsCustomerGateway(AwsManagedClient):
-
-    resource_type = 'customer_gateway'
-
-    def __init__(self, name, public_ipv4, asn=65000, **kwargs):
-        super().__init__(**kwargs)
-        self.asn = asn
-        self.name = name
-        self.public_ipv4 = public_ipv4
-
-    async def create_vpn(self, gw):
-        '''Provided an AwsTransitGateway or AwsVpnGateway, create a vpn endpoint'''
-        resource_name = f'{gw.resource_name}Id'
-
-        kwargs = dict(
-            resource_name=gw.id,
-            CustomerGatewayId=self.id,
-            Type='ipsec.1',
-            Options=dict(
-               EnableAcceleration=False,
-               StaticRoutesOnly=False,
-               TunnelInsideIpVersion='ipv4',
-               TagSpecifications=[self.resource_tags]
-            )
-        )
-        def callback():
-            r = self.client.create_vpn_connection(**kwargs)
-        await run_in_executor(callback)
-
-
-    def do_create(self):
-        r = self.client.create_customer_gateway(
-            BgpAsn=int(self.asn),
-            PublicIp=self.public_ipv4,
-            Type='ipsec.1',
-            TagSpecifications=[self.resource_tags],
-            DeviceName=self.name,
-        )
-        breakpoint()
-        self.mob = self
-        return self.mob
-
-    def find_from_id(self):
-        pass
-        self.mob = self
-        return self.mob
-
-
-class AwsVpnGateway(AwsManagedClient):
-
-    resource_type = 'vpn_gateway'
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    def do_create(self):
-        pass
-    #     r = self.client.create_customer_gateway(
-    #         BgpAsn=self.asn,
-    #         PublicIp=self.public_ipv4,
-    #         Type='ipsec.1',
-    #         TagSpecifications=[self.resource_tags],
-    #         DeviceName='string',
-    #     )
-
-@inject_autokwargs(cust_gw=AwsCustomerGateway)
-class AwsVpnConnection(AwsManagedClient):
-    
-    resource_type = 'vpn_connection'
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    async def create_vpn(self, gw):
-        '''Provided an AwsTransitGateway or AwsVpnGateway, create a vpn endpoint'''
-        resource_name = f'{gw.resource_name}Id'
-
-        kwargs = dict(
-            resource_name=gw.id,
-            CustomerGatewayId=self.cust_gw.id,
-            Type='ipsec.1',
-            Options=dict(
-               EnableAcceleration=False,
-               StaticRoutesOnly=False,
-               TunnelInsideIpVersion='ipv4',
-               TagSpecifications=[self.resource_tags]
-            )
-        )
-        def callback():
-            r = self.client.create_vpn_connection(**kwargs)
-        await run_in_executor(callback)
-
-    def do_create(self):
-        resource_name = f'{self.provided_gw.resource_name}Id'
-
-        kwargs = dict(
-            resource_name=self.provided_gw.id,
-            CustomerGatewayId=self.cust_gw.id,
-            Type='ipsec.1',
-            Options=dict(
-               EnableAcceleration=False,
-               StaticRoutesOnly=False,
-               TunnelInsideIpVersion='ipv4',
-               TagSpecifications=[self.resource_tags]
-            )
-        )
-        self.mob = self
-        return self.mob
-
-    async def post_find_hook(self):
-        pass
