@@ -1,6 +1,7 @@
 from botocore.exceptions import ClientError
 from botocore import xform_name
 import logging
+import asyncio
 
 class BaseMob:
     def __init__(self, *args, **kwargs):
@@ -97,29 +98,102 @@ async def delete_helper(client, kt, ktid, kdel, kdesc, uselist=False):
         getattr(client, kdel)(**kwargs)
         
 
+async def remove_vpns(client):
+    async def remove_vpn(x):
+        if x['State'] == 'deleted':
+            return
+        try:
+            client.delete_vpn_connection(VpnConnectionId=x['VpnConnectionId'])
+        except ClientError as e:
+            logger.info(f'Ignoring {e}')
+
+    async def remove_connection(x):
+        if x['State'] == 'deleted':
+            return
+        try:
+            client.delete_vpn_gateway(VpnGatewayId=x['VpnGatewayId'])
+        except ClientError as e:
+            logger.info(f'Ignoring {e}')
+
+    async def remove_gateway(x):
+        if x['State'] == 'deleted':
+            return
+        try:
+            client.delete_customer_gateway(CustomerGatewayId=x['CustomerGatewayId'])
+        except ClientError as e:
+            logger.info(f'Ignoring {e}')
+
+    vpns = [ x for x in client.describe_vpn_connections()['VpnConnections'] ]
+    vgws = [ x for x in client.describe_vpn_gateways()['VpnGateways'] ]
+    cgws = [ x for x in client.describe_customer_gateways()['CustomerGateways'] ]
+
+    vpt = [ remove_vpn(v) for v in vpns ]
+    vgt = [ remove_connection(v) for v in vgws ]
+    cgt = [ remove_gateway(v) for v in cgws ]
+
+    await asyncio.gather(*vpt, *vgt, *cgt)
+    
 async def remove_transit_gateways(client):
 
-    for at in client.describe_transit_gateway_attachments()['TransitGatewayAttachments']:
+    async def delete_propagation(pt):
+        try:
+            client.disable_transit_gateway_route_table_propagation(
+                TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'],
+                TransitGatewayAttachmentId=at['TransitGatewayAttachmentId']
+            )
+            client.disassociate_transit_gateway_route_table(
+            TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'],
+                TransitGatewayAttachmentId=at['TransitGatewayAttachmentId']
+            )
+        except ClientError as e:
+            logging.info(f'Ignoring {e}')
+
+    async def delete_attachment(at):
+        vpntasks = None
         if at['State'] == 'deleted':
-            continue
-        for rt in client.describe_transit_gateway_route_tables()['TransitGatewayRouteTables']:
-            for pt in client.get_transit_gateway_attachment_propagations(TransitGatewayAttachmentId=at['TransitGatewayAttachmentId']):
-                print(f'removing at {at["TransitGatewayAttachmentId"]}')
-                print(f'removing rt {rt["TransitGatewayRouteTableId"]}')
-                print(f'removing pt {pt["TransitGatewayRouteTablePropagationId"]}')
-                try:
-                    client.disable_transit_gateway_route_table_propagation(
-                        TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'],
-                        TransitGatewayAttachmentId=at['TransitGatewayAttachmentId']
-                    )
-                    client.disassociate_transit_gateway_route_table(
-                    TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'],
-                        TransitGatewayAttachmentId=at['TransitGatewayAttachmentId']
-                    )
-                    client.delete_transit_gateway_route_table(TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'])
-                except ClientError as e:
-                    print(f'Ignoring {e}')
-        client.delete_transit_gateway_vpc_attachment(TransitGatewayAttachmentId=at['TransitGatewayAttachmentId'])
+            return
+        if at['ResourceType'] == 'vpn':
+            return
+        pts = client.get_transit_gateway_attachment_propagations(TransitGatewayAttachmentId=at['TransitGatewayAttachmentId'])['TransitGatewayAttachmentPropagations']
+
+        ptasks = [ delete_propagation(pt) for pt in pts ]
+
+        await asyncio.gather(*ptasks)
+
+        try:
+            client.delete_transit_gateway_vpc_attachment(TransitGatewayAttachmentId=at['TransitGatewayAttachmentId'])
+        except ClientError as e:
+            logging.info(f'Ignoring {e}')
+        while 1:
+            r = client.describe_transit_gateway_route_tables(TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'])
+            if r['State'] == 'deleted':
+                break
+            else:
+                logging.info(f'waiting on {at} to delete')
+                asyncio.sleep(5)
+
+    async def delete_route_table(rt):
+        if rt['State'] == 'deleted':
+            return
+        try:
+            client.delete_transit_gateway_route_table(TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'])
+        except ClientError as e:
+            logging.info(f'Ignoring {e}')
+        while 1:
+            r = client.describe_transit_gateway_route_tables(TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'])
+            if r['State'] == 'deleted':
+                break
+            else:
+                logging.info(f'waiting on {at} to delete')
+                asyncio.sleep(5)
+        
+    ats = client.describe_transit_gateway_attachments()['TransitGatewayAttachments']
+    rts = client.describe_transit_gateway_route_tables()['TransitGatewayRouteTables']
+        
+    rtasks = [ delete_route_table(rt) for rt in rts ]
+    atasks = [ delete_attachment(at) for at in ats ]
+
+    await asyncio.gather(*atasks, *rtasks)
 
     for tgw in client.describe_transit_gateways()['TransitGateways']:
          if tgw['State'] not in ['deleted', 'deleting']:
@@ -152,7 +226,7 @@ async def delete_all(connection):
                 ig.detach_from_vpc(VpcId=a['VpcId'])
             ig.delete()
 
-        await remove_transit_gateways(client)
+        await asyncio.gather(remove_vpns(client), remove_transit_gateways(client))
 
         if (errors + removed) == 0:
             break
