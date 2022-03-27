@@ -414,7 +414,7 @@ class AwsClientManaged(AwsManaged):
                 else:
                     return
             # FIXME
-            if resource_type == 'target-group':
+            elif resource_type == 'target-group':
                 r = self.client.describe_target_groups()['TargetGroups']
                 r = [ x for x in r if x['TargetGroupName'] == self.name ]
                 if len(r) > 1: breakpoint()
@@ -437,8 +437,8 @@ class AwsClientManaged(AwsManaged):
                     return
             # FIXME
             elif resource_type == 'resource-share':
-                r = self.client.get_resource_shares(resourceOwner='SELF')['resourceShares']
-                r = [ x for x in r if x['name'] == self.name and x['resourceShareArn'] == self.share and x['status'] not in ['DELETING', 'DELETED'] ]
+                r = self.client.get_resource_share_associations(associationType='RESOURCE')['resourceShareAssociations']
+                r = [ x for x in r if x['resourceShareName'] == self.name and x['associatedEntity'] == self.share and x['status'] not in ['DISASSOCIATED', 'DELETING', 'DELETED'] ]
                 if len(r) > 1: breakpoint()
                 if len(r) == 1:
                     self.cache = unpack(r[0])
