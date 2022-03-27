@@ -21,6 +21,7 @@ class AwsTransitGateway(AwsClientManaged):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        self.id = None
         self.attachments = {}
         self.route_tables = {}
 
@@ -48,7 +49,10 @@ class AwsTransitGateway(AwsClientManaged):
     async def delete_route(self, cidrblock, attachment, tablename):
         pass
 
-    async def create_attachment(self, attachment):
+    async def create_attachment(self, resource):
+        pass
+
+    async def delete_attachment(self, attachment):
         pass
 
     async def create_foreign_attachment(self, attachment):
@@ -60,7 +64,7 @@ class AwsTransitGateway(AwsClientManaged):
             while state != 'available':
                 state = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[attachment.id])['TransitGatewayAttachments'][0]['State']
                 time.sleep(5)
-                print(f'waiting on {self} accepting foreign_attachment: {attachment}')
+                print(f'waiting on {self.name} accepting foreign_attachment: {attachment.name}')
             r = self.client.create_tags(
                 Resources=[attachment.id],
                 Tags=[dict(Key='Name', Value=attachment.name)],
@@ -70,29 +74,27 @@ class AwsTransitGateway(AwsClientManaged):
         await run_in_executor(callback)
 
     def do_create(self):
-        try:
-            r = self.client.create_transit_gateway(
-                Description='Created by Carthage',
-                Options={
-                    'AmazonSideAsn': 64513,
-                    'AutoAcceptSharedAttachments': 'disable',
-                    'DefaultRouteTableAssociation': 'disable',
-                    'DefaultRouteTablePropagation': 'disable',
-                    'VpnEcmpSupport': 'disable',
-                    'DnsSupport': 'disable',
-                    'MulticastSupport': 'disable',
-                },
-                TagSpecifications=[self.resource_tags]
-            )
+        r = self.client.create_transit_gateway(
+            Description='Created by Carthage',
+            Options={
+                'AmazonSideAsn': 64513,
+                'AutoAcceptSharedAttachments': 'disable',
+                'DefaultRouteTableAssociation': 'disable',
+                'DefaultRouteTablePropagation': 'disable',
+                'VpnEcmpSupport': 'disable',
+                'DnsSupport': 'disable',
+                'MulticastSupport': 'disable',
+            },
+            TagSpecifications=[self.resource_tags]
+        )
 
-            self.id = r['TransitGateway']['TransitGatewayId']
-            self.arn = r['TransitGateway']['TransitGatewayArn']
-            self.state = r['TransitGateway']['State']
-            self.asn = r['TransitGateway']['Options']['AmazonSideAsn']
-        except ClientError as e:
-            logger.error(f'Could not create TransitGatewayAttachment for {self.id} by id because {e}.')
-        self.mob = unpack(r)
-        return self.mob
+        r = r['TransitGateway']
+        self.id = r['TransitGatewayId']
+        self.arn = r['TransitGatewayArn']
+        self.state = r['State']
+        self.asn = r['Options']['AmazonSideAsn']
+        self.cache = unpack(r)
+        return self.cache
 
     async def post_find_hook(self):
         while True:
@@ -101,14 +103,6 @@ class AwsTransitGateway(AwsClientManaged):
             print(f'waiting on tgw: {self}')
             await asyncio.sleep(5)
 
-    def find_from_id(self):
-        r = self.client.describe_transit_gateways(TransitGatewayIds=[self.id])
-        for t in r['TransitGateways'][0]['Tags']:
-            if t['Key'] == 'Name':
-                self.name = t['Value']
-        self.mob = unpack(r)
-        return self.mob
-    
 @dataclass(repr=False)
 class AwsTransitGatewayRoute:
     resource_type = 'transit-gateway-route'
@@ -133,9 +127,7 @@ class AwsTransitGatewayRouteTable(AwsClientManaged):
         super().__init__(**kwargs)
 
         self.client = self.service_resource
-        # self.routes = None
-        # self.local_routes = None
-        # self.foreign_routes = None
+        self.id = None
 
     @memoproperty
     def service_resource(self):
@@ -148,10 +140,12 @@ class AwsTransitGatewayRouteTable(AwsClientManaged):
                 TransitGatewayRouteTableId=self.id,
                 TransitGatewayAttachmentId=association.id
             )
-            self.association = association
-            association.association = self
         except ClientError as e:
-            logger.error(f'{e}')
+            if e.response['Error']['Code'] == 'Resource.AlreadyAssociated':
+                return
+            raise
+        self.association = association
+        association.association = self
 
     async def create_route(self, cidrblock, attachment):
         def callback():
@@ -162,60 +156,61 @@ class AwsTransitGatewayRouteTable(AwsClientManaged):
                         TransitGatewayAttachmentId=attachment.id,
                         Blackhole=False
                     )
-                logger.info(f"Created route {cidrblock}->{attachment} on {self}")
             except ClientError as e:
-                logger.error(f"Could not create AwsTransitGatewayRoute on {self} due to {e}")
+                if e.response['Error']['Code'] == 'RouteAlreadyExists':
+                    return
+                raise
         await run_in_executor(callback)
 
     async def disassociate(self, association):
         '''Disassociate route table with AwsTransitGatewayAttachment'''
         assert self.association!=None,"You must have an association"
-        try:
+        def callback():
             r = self.client.disassociate_transit_gateway_route_table(
                 TransitGatewayRouteTableId=self.id,
                 TransitGatewayAttachmentId=association.id
             )
             association.association = None
             self.association = None
-        except ClientError as e:
-            logger.error(f'{e}')
+        await run_in_executor(callback)
 
     async def propagate(self, propagation):
         '''Propagate routes to table from AwsTransitGatewayAttachment'''
-        try:
-            r = self.client.enable_transit_gateway_route_table_propagation(
-                TransitGatewayRouteTableId=self.id,
-                TransitGatewayAttachmentId=propagation.id
-            )
-            if not hasattr(self, 'propagations'):
-                self.propagations = []
-            else:
-                self.propagations.append(propagation)
-        except ClientError as e:
-            logger.error(f'{e}')
+        def callback():
+            try:
+                r = self.client.enable_transit_gateway_route_table_propagation(
+                    TransitGatewayRouteTableId=self.id,
+                    TransitGatewayAttachmentId=propagation.id
+                )
+                if not hasattr(self, 'propagations'):
+                    self.propagations = []
+                else:
+                    self.propagations.append(propagation)
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'TransitGatewayRouteTablePropagation.Duplicate':
+                    return
+                raise
+        await run_in_executor(callback)
 
     async def depropagate(self, propagation):
         '''Disable propagation of routes to table from AwsTransitGatewayAttachment'''
         # assert hasattr(self, 'propagation'),"You must have propagations"
-        try:
+        def handler():
             r = self.client.disable_transit_gateway_route_table_propagation(
                 TransitGatewayRouteTableId=self.id,
                 TransitGatewayAttachmentId=propagation.id
             )
             # self.propagations.remove(propagation)
-        except ClientError as e:
-            logger.error(f'{e}')
+        await run_in_executor(callback)
         
     def do_create(self):
-        try:
-            r = self.client.create_transit_gateway_route_table(
-                TransitGatewayId=self.tgw.id,
-                TagSpecifications=[self.resource_tags]
-            )
-        except ClientError as e:
-            logger.error(f'Could not create TransitGatewayAttachment for {self.id} because {e}.')
-        self.mob = unpack(r)
-        return self.mob
+        r = self.client.create_transit_gateway_route_table(
+            TransitGatewayId=self.tgw.id,
+            TagSpecifications=[self.resource_tags]
+        )
+        self.id = r['TransitGatewayRouteTable']['TransitGatewayRouteTableId']
+        self.cache = unpack(r)
+        return self.cache
 
     async def post_find_hook(self):
         while True:
@@ -224,7 +219,9 @@ class AwsTransitGatewayRouteTable(AwsClientManaged):
             if state == 'available': break
             print(f'waiting on tgw_route_table: {self}')
             await asyncio.sleep(5)
-        self.tgw.route_tables[self.id] = self
+        self.tgw.route_tables.update({self.id:self})
+        r = self.client.describe_transit_gateway_route_tables(TransitGatewayRouteTableIds=[self.id])
+        self.cache = unpack(r)
 
 @inject_autokwargs(tgw=AwsTransitGateway, vpc=AwsVirtualPrivateCloud)
 class AwsTransitGatewayAttachment(AwsClientManaged):
@@ -241,6 +238,7 @@ class AwsTransitGatewayAttachment(AwsClientManaged):
         else:
             self.subnets = False
         super().__init__(**kwargs)
+        self.id = None
         if self.subnets is False:
             self.subnets = [self.injector.get_instance(AwsSubnet)]
 
@@ -293,5 +291,5 @@ class AwsTransitGatewayAttachment(AwsClientManaged):
             self.reload()
             self._wait_for_ready()
             self._update_attachment_subnets()
-        self.tgw.attachments[self.id] = self
+        self.tgw.attachments.update({self.id:self})
         await run_in_executor(callback)
