@@ -59,10 +59,9 @@ class AwsCustomerGateway(AwsClientManaged):
             Type='ipsec.1',
             TagSpecifications=[self.resource_tags],
             DeviceName=self.name,
-        )
-        breakpoint()
-        self.mob = unpack(r)
-        return self.mob
+        )['CustomerGateway']
+        self.cache = unpack(r)
+        return self.cache
 
 class AwsVpnGateway(AwsClientManaged):
 
@@ -78,8 +77,8 @@ class AwsVpnGateway(AwsClientManaged):
             TagSpecifications=[self.resource_tags],
             AmazonSideAsn=123
         )
-        self.mob = unpack(r)
-        return self.mob
+        self.cache = unpack(r)
+        return self.cache
 
 @inject_autokwargs(tgw=AwsTransitGateway, cust_gw=AwsCustomerGateway)
 class AwsVpnConnection(AwsClientManaged):
@@ -123,10 +122,7 @@ class AwsVpnConnection(AwsClientManaged):
             },
            'TagSpecifications':[self.resource_tags]
         }
-        r = self.client.create_vpn_connection(**kwargs)
-        self.cust_info = parse(r)
-        self.mob = unpack(r)
-        return self.mob
-
-    async def post_find_hook(self):
-        pass
+        r = self.client.create_vpn_connection(**kwargs)['VpnConnection']
+        self.cache = unpack(r)
+        self.cust_info = parse(self.cache.CustomerGatewayConfiguration)
+        return self.cache
