@@ -135,14 +135,14 @@ async def remove_vpns(client):
     
 async def remove_transit_gateways(client):
 
-    async def delete_propagation(pt):
+    async def delete_propagation(rt, at):
         try:
             client.disable_transit_gateway_route_table_propagation(
                 TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'],
                 TransitGatewayAttachmentId=at['TransitGatewayAttachmentId']
             )
             client.disassociate_transit_gateway_route_table(
-            TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'],
+                TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'],
                 TransitGatewayAttachmentId=at['TransitGatewayAttachmentId']
             )
         except ClientError as e:
@@ -154,9 +154,9 @@ async def remove_transit_gateways(client):
             return
         if at['ResourceType'] == 'vpn':
             return
-        pts = client.get_transit_gateway_attachment_propagations(TransitGatewayAttachmentId=at['TransitGatewayAttachmentId'])['TransitGatewayAttachmentPropagations']
+        rts = client.get_transit_gateway_attachment_propagations(TransitGatewayAttachmentId=at['TransitGatewayAttachmentId'])['TransitGatewayAttachmentPropagations']
 
-        ptasks = [ delete_propagation(pt) for pt in pts ]
+        ptasks = [ delete_propagation(rt, at) for rt in rts ]
 
         await asyncio.gather(*ptasks)
 
@@ -165,12 +165,12 @@ async def remove_transit_gateways(client):
         except ClientError as e:
             logging.info(f'Ignoring {e}')
         while 1:
-            r = client.describe_transit_gateway_route_tables(TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'])
+            r = client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[at['TransitGatewayAttachmentId']])['TransitGatewayAttachments'][0]
             if r['State'] == 'deleted':
                 break
             else:
                 logging.info(f'waiting on {at} to delete')
-                asyncio.sleep(5)
+                await asyncio.sleep(5)
 
     async def delete_route_table(rt):
         if rt['State'] == 'deleted':
@@ -180,12 +180,12 @@ async def remove_transit_gateways(client):
         except ClientError as e:
             logging.info(f'Ignoring {e}')
         while 1:
-            r = client.describe_transit_gateway_route_tables(TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'])
+            r = client.describe_transit_gateway_route_tables(TransitGatewayRouteTableIds=[rt['TransitGatewayRouteTableId']])['TransitGatewayRouteTables'][0]
             if r['State'] == 'deleted':
                 break
             else:
-                logging.info(f'waiting on {at} to delete')
-                asyncio.sleep(5)
+                logging.info(f'waiting on {rt} to delete')
+                await asyncio.sleep(5)
         
     ats = client.describe_transit_gateway_attachments()['TransitGatewayAttachments']
     rts = client.describe_transit_gateway_route_tables()['TransitGatewayRouteTables']
@@ -200,6 +200,7 @@ async def remove_transit_gateways(client):
              print(f'removing tgw {tgw["TransitGatewayId"]}')
              client.delete_transit_gateway(TransitGatewayId=tgw['TransitGatewayId'])
 
+
 async def delete_all(connection):
 
     while True:
@@ -208,6 +209,8 @@ async def delete_all(connection):
 
         ec2 = connection.connection.resource('ec2')
         client = connection.connection.client('ec2')
+
+        await asyncio.gather(remove_vpns(client), remove_transit_gateways(client))
 
         await delete_helper(client, 'NatGateways', 'NatGatewayId', 'delete_nat_gateway', 'describe_nat_gateways')
         await delete_helper(client, 'VpcEndpoints', 'VpcEndpointId', 'delete_vpc_endpoints', 'describe_vpc_endpoints', uselist=True)
@@ -225,8 +228,6 @@ async def delete_all(connection):
             for a in ig.attachments:
                 ig.detach_from_vpc(VpcId=a['VpcId'])
             ig.delete()
-
-        await asyncio.gather(remove_vpns(client), remove_transit_gateways(client))
 
         if (errors + removed) == 0:
             break
