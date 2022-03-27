@@ -51,7 +51,6 @@ resource_factory_methods = dict(
     ipv6pool_ec2='Ipv6PoolEc2',
     key_pair='KeyPair',
     launch_template='LaunchTemplate',
-    load_balancer='GatewayLoadBalancer',
     local_gateway='LocalGateway',
     local_gateway_route_table='LocalGatewayRouteTable',
     local_gateway_virtual_interface='LocalGatewayVirtualInterface',
@@ -405,9 +404,30 @@ class AwsClientManaged(AwsManaged):
         elif self.name:
             resource_type = '-'.join(self.resource_type.split('_')) if '_' in self.resource_type else self.resource_type
             # FIXME
-            if resource_type == 'load-balancer':
+            if resource_type == 'listener':
+                r = self.client.describe_listeners(LoadBalancerArn=self.lb.arn)['Listeners']
+                if len(r) > 1: breakpoint()
+                if len(r) == 1:
+                    self.cache = unpack(r[0])
+                    self.arn = self.cache.ListenerArn
+                    return
+                else:
+                    return
+            # FIXME
+            if resource_type == 'target-group':
+                r = self.client.describe_target_groups()['TargetGroups']
+                r = [ x for x in r if x['TargetGroupName'] == self.name ]
+                if len(r) > 1: breakpoint()
+                if len(r) == 1:
+                    self.cache = unpack(r[0])
+                    self.arn = self.cache.TargetGroupArn
+                    return
+                else:
+                    return
+            # FIXME
+            elif resource_type == 'load-balancer':
                 r = self.client.describe_load_balancers()['LoadBalancers']
-                r = [ x for x in r if x['name'] == self.name and x['State']['Code'] in ['active', 'provisioning'] ]
+                r = [ x for x in r if x['LoadBalancerName'] == self.name and x['State']['Code'] in ['active', 'provisioning'] ]
                 if len(r) > 1: breakpoint()
                 if len(r) == 1:
                     self.cache = unpack(r[0])
@@ -418,7 +438,7 @@ class AwsClientManaged(AwsManaged):
             # FIXME
             elif resource_type == 'resource-share':
                 r = self.client.get_resource_shares(resourceOwner='SELF')['resourceShares']
-                r = [ x for x in r if x['name'] == self.name and x['status'] not in ['DELETING', 'DELETED'] ]
+                r = [ x for x in r if x['name'] == self.name and x['resourceShareArn'] == self.share and x['status'] not in ['DELETING', 'DELETED'] ]
                 if len(r) > 1: breakpoint()
                 if len(r) == 1:
                     self.cache = unpack(r[0])
