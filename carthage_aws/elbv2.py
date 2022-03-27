@@ -70,26 +70,22 @@ class AwsLoadBalancerTargetGroup(AwsClientManaged):
 
     resource_type = 'target_group'
     client_type = 'elbv2'
-    allproto = ['HTTP'|'HTTPS'|'TCP'|'TLS'|'UDP'|'TCP_UDP'|'GENEVE']
+    allproto = ['HTTP','HTTPS','TCP','TLS','UDP','TCP_UDP','GENEVE']
 
     def do_create(self):
-        assert self.proto in allproto,f"{self.proto} must be one of {allproto}"
-        response = client.create_target_group(
+        r = self.client.create_target_group(
             Name=self.name,
             Protocol='GENEVE',
-            ProtocolVersion='string',
             Port=6081,
-            VpcId=self.vpc,
-            TargetType='instance',
-            Tags=[dict(Key='Name',Value=self.name)],
-            IpAddressType='ipv4'
+            VpcId=self.vpc.id,
+            TargetType='instance'
         )
         r = r['TargetGroups'][0]
         self.cache = unpack(r)
         self.arn = self.cache.TargetGroupArn
         return self.cache
 
-@inject_autokwargs(vpc=AwsVirtualPrivateCloud, lb=AwsLoadBalancer, tg=AwsLoadBalancerTargetGroup)
+@inject_autokwargs(lb=AwsLoadBalancer, tg=AwsLoadBalancerTargetGroup)
 class AwsLoadBalancerListener(AwsClientManaged):
     def __init__(self, **kwargs):
         if ('target' in kwargs) and ('targets' in kwargs):
@@ -103,33 +99,15 @@ class AwsLoadBalancerListener(AwsClientManaged):
         super().__init__(**kwargs)
         self.arn = None
 
-    resource_type = 'target_group'
+    resource_type = 'listener'
     client_type = 'elbv2'
-    allproto = ['HTTP'|'HTTPS'|'TCP'|'TLS'|'UDP'|'TCP_UDP'|'GENEVE']
+    allproto = ['HTTP','HTTPS','TCP','TLS','UDP','TCP_UDP','GENEVE']
 
     def do_create(self):
         r = self.client.create_listener(
-            LoadBalancerArn=lb.arn,
-            Protocol='GENEVE',
-            Port=6081,
-            DefaultActions=[
-                {
-                'Type': 'forward',
-                'TargetGroupArn': tg.arn
-                },
-            ],
-            'ForwardConfig': {
-                'TargetGroups': [
-                    {
-                            'TargetGroupArn': 'string',
-                                'Weight': 123
-                        },
-                ],
-            }
-            Tags=[
+            LoadBalancerArn=self.lb.arn,
+            DefaultActions=[dict(Type='forward',TargetGroupArn=self.tg.arn)]
         )
-
-
         r = r['Listeners'][0]
         self.cache = unpack(r)
         self.arn = self.cache.ListenerArn
