@@ -98,15 +98,26 @@ async def delete_helper(client, kt, ktid, kdel, kdesc, uselist=False):
         getattr(client, kdel)(**kwargs)
         
 async def remove_load_balancers(client):
-    async def remove_target_groups():
-        pass
+    async def remove_target_groups(lb):
+        tasks = []
+        for tg in client.describe_target_groups(LoadBalancerArn=lb['LoadBalancerArn'])['TargetGroups']:
+            tasks.append(client.delete_target_group(TargetGroupArn=tg['TargetGroupArn']))
+        await asyncio.gather(*tasks)
 
-    async def remove_listeners():
-        pass
+    async def remove_listeners(lb):
+        tasks = []
+        for li in client.describe_listeners(LoadBalancerArn=lb['LoadBalancerArn'])['Listeners']:
+            tasks.append(client.delete_listener(ListenerArn=li['ListenerArn']))
+        await asyncio.gather(*tasks)
 
-    client.describe_target_groups()
-    client.describe_listeners()
-    client.describe_load_balancers()
+    tasks = []
+    for lb in client.describe_load_balancers()['LoadBalancers']:
+        tasks.append(remove_listeners(lb))
+        tasks.append(remove_target_groups(lb))
+        tasks.append(client.delete_load_balancer(LoadBalancerArn=lb['LoadBalancerArn']))
+    await asyncio.gather(*tasks)
+
+
     return
 
 async def remove_vpns(client):
@@ -192,10 +203,13 @@ async def remove_transit_gateways(client):
 
         await asyncio.gather(*atasks)
 
-        try:
-            client.delete_transit_gateway_route_table(TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'])
-        except ClientError as e:
-            logging.info(f'Ignoring {e}')
+        while 1: 
+            try:
+                client.delete_transit_gateway_route_table(TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'])
+            except ClientError as e:
+                logging.info(f'Ignoring {e}')
+                await asyncio.sleep(5)
+
         while 1:
             try:
                 r = client.describe_transit_gateway_route_tables(TransitGatewayRouteTableIds=[rt['TransitGatewayRouteTableId']])['TransitGatewayRouteTables'][0]
@@ -207,6 +221,8 @@ async def remove_transit_gateways(client):
     ats = client.describe_transit_gateway_attachments()['TransitGatewayAttachments']
     rts = client.describe_transit_gateway_route_tables()['TransitGatewayRouteTables']
         
+    breakpoint()
+
     rtasks = [ delete_route_table(rt) for rt in rts ]
     atasks = [ delete_attachment(at) for at in ats ]
 
@@ -228,7 +244,7 @@ async def delete_all(connection):
         client = connection.connection.client('ec2')
         elbv2 = connection.connection.client('elbv2')
 
-        await asyncio.gather(remove_vpns(client), remove_transit_gateways(client), remove_load_balancers(elbv2))
+        # await asyncio.gather(remove_vpns(client), remove_transit_gateways(client), remove_load_balancers(elbv2))
 
         await delete_helper(client, 'NatGateways', 'NatGatewayId', 'delete_nat_gateway', 'describe_nat_gateways')
         await delete_helper(client, 'VpcEndpoints', 'VpcEndpointId', 'delete_vpc_endpoints', 'describe_vpc_endpoints', uselist=True)

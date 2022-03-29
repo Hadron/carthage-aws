@@ -130,11 +130,11 @@ class AwsVm(AwsManaged, Machine):
             extra = {}
             key_name = self._gfi('aws_key_name', default=None)
             if key_name: extra['KeyName'] = key_name
-
             r = self.connection.client.run_instances(
                 ImageId=self.image_id,
                 MinCount=1,
                 MaxCount=1,
+                # BootMode='uefi',
                 InstanceType=self._gfi('aws_instance_type'),
                 UserData=user_data,
                 NetworkInterfaces=network_interfaces,

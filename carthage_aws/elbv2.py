@@ -57,14 +57,6 @@ class AwsLoadBalancer(AwsClientManaged):
 @inject_autokwargs(vpc=AwsVirtualPrivateCloud)
 class AwsLoadBalancerTargetGroup(AwsClientManaged):
     def __init__(self, **kwargs):
-        if ('target' in kwargs) and ('targets' in kwargs):
-            raise ValueError(f"call to AwsGatewayLoadBalancer should not specify both 'target' and 'targets'")
-        elif ('target' in kwargs):
-            self.targets = [kwargs.pop('target')]
-        elif ('targets' in kwargs):
-            self.targets = kwargs.pop('targets')
-        else:
-            self.subnets = False
         super().__init__(**kwargs)
         self.arn = None
 
@@ -84,6 +76,13 @@ class AwsLoadBalancerTargetGroup(AwsClientManaged):
         self.cache = unpack(r)
         self.arn = self.cache.TargetGroupArn
         return self.cache
+
+    def register_targets(self, *targets):
+        r = self.client.register_targets(
+            TargetGroupArn=self.arn,
+            Targets=[dict(Id=x.id) for x in targets]
+        )
+        self.targets = targets
 
 @inject_autokwargs(lb=AwsLoadBalancer, tg=AwsLoadBalancerTargetGroup)
 class AwsLoadBalancerListener(AwsClientManaged):

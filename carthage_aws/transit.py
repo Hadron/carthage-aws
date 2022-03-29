@@ -250,7 +250,7 @@ class AwsTransitGatewayAttachment(AwsClientManaged):
             Options={
                 'DnsSupport': 'disable',
                 'Ipv6Support': 'disable',
-                'ApplianceModeSupport': 'disable'
+                'ApplianceModeSupport': 'enable'
             },
             TagSpecifications=[self.resource_tags]
         )['TransitGatewayVpcAttachment']

@@ -111,7 +111,10 @@ class AwsVirtualPrivateCloud(AwsManaged):
         await run_in_executor(callback)
 
     async def post_find_hook(self):
-        groups =self.connection.client.describe_security_groups(
+        if IPv4Network(self.mob.cidr_block) != IPv4Network(self.model.cidrblock):
+            raise RuntimeError(f'current CIDR for {self.name} ({self.mob.cidr_block}) does not match requested ({self.model.cidrblock})')
+        
+        groups = self.connection.client.describe_security_groups(
             Filters=[dict(Name='vpc-id', Values=[self.id])])
         self.groups = list(filter(lambda g: g['GroupName'] != "default", groups['SecurityGroups']))
         
@@ -154,7 +157,7 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
             CidrBlock=str(self.network.v4_config.network),
             TagSpecifications=[self.resource_tags]
         )
-        if self.network.az != None:
+        if hasattr(self.network, 'az'):
             kwargs.update(dict(AvailabilityZone=self.network.az))
         r = self.connection.client.create_subnet(**kwargs)
         self.id = r['Subnet']['SubnetId']
@@ -215,6 +218,8 @@ class AwsRouteTable(AwsManaged):
         if kind is None:
             if isinstance(target, AwsInternetGateway):
                 kind = 'Gateway'
+            elif target.__class__.__name__ == 'AwsVpcEndpoint':
+                kind = 'VpcEndpoint'
             elif isinstance(target, AwsTransitGateway):
                 kind = 'TransitGateway'
             elif getattr(target, 'interface_type', None) == 'interface':

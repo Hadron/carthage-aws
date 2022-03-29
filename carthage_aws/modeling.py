@@ -38,6 +38,10 @@ class AwsVirtualPrivateCloudModel(InjectableModel, metaclass=ModelingBase):
 
     vpc = injector_access(InjectionKey(MachineImplementation))
 
+    @classmethod
+    def our_key(self):
+        return InjectionKey(AwsVirtualPrivateCloudModel, name=self.name)
+
     def __init__(self, *args, **kwargs):
 
         super().__init__(*args, **kwargs)
@@ -66,3 +70,15 @@ class AwsKeyPairModel(InjectableModel, metaclass=ModelingBase):
         self.injector.add_provider(InjectionKey('config/aws.keypair_keyfile'), self.keyfile)
         self.injector.add_provider(InjectionKey(MachineModel), self)
         self.injector.add_provider(InjectionKey(AwsKeyPair), MachineImplementation)
+
+class AwsVpcNetworkModel(NetworkModel):
+
+    @classmethod
+    def our_key(self):
+        return InjectionKey(AwsVpcNetworkModel, name=self.name)
+
+    async def async_ready(self):
+        key = InjectionKey(AwsVirtualPrivateCloud, name=self.vpc, _ready=False)
+        obj = await self.ainjector.get_instance_async(key)
+        self.ainjector.add_provider(InjectionKey(AwsVirtualPrivateCloud), obj)
+        await super().async_ready()
