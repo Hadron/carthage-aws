@@ -114,15 +114,21 @@ class AwsVm(AwsManaged, Machine):
         network_interfaces = []
         device_index = 0
         for l in self.network_links.values():
-            network_interfaces.append(
-                {
-                    'DeviceIndex': device_index,
-                    'Description': l.interface,
-                    'SubnetId': l.net_instance.id,
-                    'AssociatePublicIpAddress': True,
-                    'Groups': [ l.net_instance.vpc.groups[0]['GroupId'] ]
-                })
-            
+            d = {
+                'DeviceIndex': device_index,
+                'Description': l.interface,
+                'SubnetId': l.net_instance.id,
+            }
+            if l.merged_v4_config.address:
+                assert l.merged_v4_config.address in l.net.v4_config.network.hosts(),f"{l.merged_v4_config.address} is not a hostaddr in {l.net.v4_config.network} for host {self.name}"
+                d['PrivateIpAddress'] = l.merged_v4_config.address.compressed
+            if len(self.network_links) == 1:
+                d['AssociatePublicIpAddress'] = True
+            if l.net_instance.vpc.groups:
+                d['Groups'] = [ l.net_instance.vpc.groups[0]['GroupId'] ]
+            network_interfaces.append(d)
+            device_index += 1
+
 
         user_data = ""
         if self.cloud_config:
