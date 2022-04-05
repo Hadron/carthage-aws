@@ -50,9 +50,14 @@ class AwsLoadBalancer(AwsClientManaged):
             IpAddressType='ipv4'
         )
 
-    @callback
+    def enable_cross_zone_load_balancing(self):
+        r = self.client.modify_load_balancer_attributes(
+            Attributes=[dict(Key='load_balancer.cross_zone.enabled',Value='true')],
+            LoadBalancerArn=self.arn
+        )
+
     def delete(self):
-        self.client.delete_load_balancer(LoadBalancerArn=self.cache.LoadBalancerArn)
+        r = self.client.delete_load_balancer(LoadBalancerArn=self.arn)
 
 @inject_autokwargs(vpc=AwsVirtualPrivateCloud)
 class AwsLoadBalancerTargetGroup(AwsClientManaged):
@@ -70,18 +75,28 @@ class AwsLoadBalancerTargetGroup(AwsClientManaged):
             Protocol='GENEVE',
             Port=6081,
             VpcId=self.vpc.id,
-            TargetType='instance'
+            HealthCheckProtocol='HTTPS',
+            HealthCheckPort='443',
+            HealthCheckEnabled=True,
+            HealthCheckPath='/',
+            HealthCheckIntervalSeconds=8,
+            HealthCheckTimeoutSeconds=3,
+            HealthyThresholdCount=3,
+            UnhealthyThresholdCount=3,
+            TargetType='ip'
         )
         r = r['TargetGroups'][0]
         self.cache = unpack(r)
         self.arn = self.cache.TargetGroupArn
         return self.cache
 
+    @callback
     def register_targets(self, *targets):
-        r = self.client.register_targets(
+        kwargs = dict(
             TargetGroupArn=self.arn,
-            Targets=[dict(Id=x.id) for x in targets]
+            Targets=[dict(Id=x) for x in targets]
         )
+        r = self.client.register_targets(**kwargs)
         self.targets = targets
 
 @inject_autokwargs(lb=AwsLoadBalancer, tg=AwsLoadBalancerTargetGroup)

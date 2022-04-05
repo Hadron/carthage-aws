@@ -62,6 +62,11 @@ class AwsVpcEndpoint(AwsClientManaged):
 
     resource_type = 'vpc_endpoint'
 
+    @property
+    def private_ipv4_address(self):
+        return unpack(self.client.describe_network_interfaces(NetworkInterfaceIds=[self.cache.NetworkInterfaceIds[0]])['NetworkInterfaces'][0]).PrivateIpAddress
+
+
     def do_create(self):
         r = self.client.create_vpc_endpoint(
             VpcEndpointType='GatewayLoadBalancer',

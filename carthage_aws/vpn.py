@@ -124,5 +124,5 @@ class AwsVpnConnection(AwsClientManaged):
         }
         r = self.client.create_vpn_connection(**kwargs)['VpnConnection']
         self.cache = unpack(r)
-        self.cust_info = parse(self.cache.CustomerGatewayConfiguration)
+        self.cust_info = unpack(parse(self.cache.CustomerGatewayConfiguration, dict_constructor=dict))
         return self.cache

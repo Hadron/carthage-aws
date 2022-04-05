@@ -41,6 +41,10 @@ def unpack(i, c=0, rk=''):
         return i
     return type(rk[:-1] if rk.endswith('s') else rk, (BaseMob,), {})(attrs)
 
+def find_ipv4_interfaces(machine):
+    setattr(machine, 'interfaces', {})
+    _ = [ machine.interfaces.update({f'{x[0]}':x[1].private_ip_address}) for x in zip(machine.network_links, machine.mob.network_interfaces) ]
+
 def find_tags(tl, tn):
     tl = [ x for x in tl if x['Key'] == tn  ]
     values = [ x['Value'] for x in tl ]

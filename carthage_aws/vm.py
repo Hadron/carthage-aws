@@ -18,6 +18,7 @@ from carthage.config import ConfigLayout
 from carthage.machine import Machine
 from carthage.network import NetworkConfig, NetworkLink
 from carthage.cloud_init import generate_cloud_init_cloud_config
+import logging
 
 import boto3
 from botocore.exceptions import ClientError
@@ -25,9 +26,12 @@ from botocore.exceptions import ClientError
 from .connection import AwsConnection, AwsManaged, run_in_executor
 from .network import AwsVirtualPrivateCloud, AwsSubnet
 
-__all__ = ['AwsVm']
+__all__ = ['AwsVm', 'UserDataProvider']
 
-
+@inject_autokwargs(model = AbstractMachineModel)
+class UserDataProvider(Injectable):
+    async def generate_user_data(self):
+        raise NotImplementedError
 
 @inject_autokwargs(connection=InjectionKey(AwsConnection))
 class AwsVm(AwsManaged, Machine):
@@ -92,9 +96,19 @@ class AwsVm(AwsManaged, Machine):
 
     async def pre_create_hook(self):
         async with self._operation_lock:
-            if getattr(self.model, 'cloud_init',False):
-                self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
-            else: self.cloud_config = None
+
+            if hasattr(self.model, 'provide_user_data'):
+                if hasattr(self.model, 'cloud_init'):
+                    logging.warning(f'{self.model} provides both cloud_init and provide_user_data; ignoring cloud_init')
+                self.user_data = await (await self.ainjector.get_instance_async(InjectionKey(UserDataProvider, _ready=True))).generate_user_data()
+                self.cloud_config = None
+            else:
+                self.user_data = None
+                if getattr(self.model, 'cloud_init', False):
+                    self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
+                else:
+                    self.cloud_config = None
+
             self.image_id = await self.ainjector.get_instance_async('aws_ami')
             await self.start_dependencies()
             await super().start_machine()
@@ -112,6 +126,7 @@ class AwsVm(AwsManaged, Machine):
                 'Description': l.interface,
                 'SubnetId': l.net_instance.id,
             }
+            breakpoint()
             if len(self.network_links) == 1:
                 d['AssociatePublicIpAddress'] = True
             if l.net_instance.vpc.groups:
@@ -119,12 +134,12 @@ class AwsVm(AwsManaged, Machine):
             network_interfaces.append(d)
             device_index += 1
 
-        user_data = ""
-        if self.cloud_config:
-            user_data = "#cloud-config\n"
-            user_data += yaml.dump(self.cloud_config.user_data, default_flow_style=False)
+        user_data = self.user_data
+        if (user_data is None) and self.cloud_config:
+            user_data = "#cloud-config\n" + \
+                yaml.dump(self.cloud_config.user_data, default_flow_style=False)
             
-        logger.info(f'Starting {self.name} VM')
+        logger.info(f'Starting {self.name} with {user_data}')
 
         try:
             extra = {}

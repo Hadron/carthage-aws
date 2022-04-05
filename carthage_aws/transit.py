@@ -5,7 +5,7 @@ import logging
 from carthage import *
 from carthage.dependency_injection import *
 from carthage.utils import memoproperty
-from carthage_aws.connection import AwsConnection, AwsManaged, AwsClientManaged, run_in_executor
+from carthage_aws.connection import AwsConnection, AwsManaged, AwsClientManaged, callback, run_in_executor
 from carthage_aws.network import AwsVirtualPrivateCloud, AwsSubnet
 
 from .utils import unpack
@@ -31,9 +31,6 @@ class AwsTransitGateway(AwsClientManaged):
     async def propagate(self, attachment, table):
         await self.route_tables[table.id].propagate(self.attachments[attachment.id])
 
-    async def create_route_table(self, name):
-        pass
-
     async def create_route(self, cidrblock, attachment, table):
         await self.route_tables[table.id].create_route(cidrblock, attachment)
 
@@ -57,21 +54,19 @@ class AwsTransitGateway(AwsClientManaged):
 
     async def create_foreign_attachment(self, attachment):
         '''Args: AwsTransitGatewayAttachment'''
-        def callback():
+        state = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[attachment.id])['TransitGatewayAttachments'][0]['State']
+        if state not in ['pending', 'available']:
+            r = self.client.accept_transit_gateway_vpc_attachment(TransitGatewayAttachmentId=attachment.id)
+        while state != 'available':
             state = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[attachment.id])['TransitGatewayAttachments'][0]['State']
-            if state not in ['pending', 'available']:
-                r = self.client.accept_transit_gateway_vpc_attachment(TransitGatewayAttachmentId=attachment.id)
-            while state != 'available':
-                state = self.client.describe_transit_gateway_attachments(TransitGatewayAttachmentIds=[attachment.id])['TransitGatewayAttachments'][0]['State']
-                time.sleep(5)
-                print(f'waiting on {self.name} accepting foreign_attachment: {attachment.name}')
-            r = self.client.create_tags(
-                Resources=[attachment.id],
-                Tags=[dict(Key='Name', Value=attachment.name)],
-            )
-            # TODO
-            # associate route table
-        await run_in_executor(callback)
+            time.sleep(5)
+            print(f'waiting on {self.name} accepting foreign_attachment: {attachment.name}')
+        r = self.client.create_tags(
+            Resources=[attachment.id],
+            Tags=[dict(Key='Name', Value=attachment.name)],
+        )
+        # TODO
+        # associate route table
 
     def do_create(self):
         r = self.client.create_transit_gateway(
@@ -133,7 +128,8 @@ class AwsTransitGatewayRouteTable(AwsClientManaged):
     def service_resource(self):
         return self.connection.connection.client('ec2', region_name=self.connection.region)
 
-    async def associate(self, association):
+    @callback
+    def associate(self, association):
         '''Associate route table with AwsTransitGatewayAttachment'''
         try:
             r = self.client.associate_transit_gateway_route_table(
@@ -147,61 +143,57 @@ class AwsTransitGatewayRouteTable(AwsClientManaged):
         self.association = association
         association.association = self
 
-    async def create_route(self, cidrblock, attachment):
-        def callback():
-            try:
-                _ = self.client.create_transit_gateway_route(
-                        DestinationCidrBlock=cidrblock,
-                        TransitGatewayRouteTableId=self.id,
-                        TransitGatewayAttachmentId=attachment.id,
-                        Blackhole=False
-                    )
-            except ClientError as e:
-                if e.response['Error']['Code'] == 'RouteAlreadyExists':
-                    return
-                raise
-        await run_in_executor(callback)
+    @callback
+    def create_route(self, cidrblock, attachment):
+        try:
+            _ = self.client.create_transit_gateway_route(
+                    DestinationCidrBlock=cidrblock,
+                    TransitGatewayRouteTableId=self.id,
+                    TransitGatewayAttachmentId=attachment.id,
+                    Blackhole=False
+                )
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'RouteAlreadyExists':
+                return
+            raise
 
-    async def disassociate(self, association):
+    @callback
+    def disassociate(self, association):
         '''Disassociate route table with AwsTransitGatewayAttachment'''
         assert self.association!=None,"You must have an association"
-        def callback():
-            r = self.client.disassociate_transit_gateway_route_table(
-                TransitGatewayRouteTableId=self.id,
-                TransitGatewayAttachmentId=association.id
-            )
-            association.association = None
-            self.association = None
-        await run_in_executor(callback)
+        r = self.client.disassociate_transit_gateway_route_table(
+            TransitGatewayRouteTableId=self.id,
+            TransitGatewayAttachmentId=association.id
+        )
+        association.association = None
+        self.association = None
 
-    async def propagate(self, propagation):
+    @callback
+    def propagate(self, propagation):
         '''Propagate routes to table from AwsTransitGatewayAttachment'''
-        def callback():
-            try:
-                r = self.client.enable_transit_gateway_route_table_propagation(
-                    TransitGatewayRouteTableId=self.id,
-                    TransitGatewayAttachmentId=propagation.id
-                )
-                if not hasattr(self, 'propagations'):
-                    self.propagations = []
-                else:
-                    self.propagations.append(propagation)
-            except ClientError as e:
-                if e.response['Error']['Code'] == 'TransitGatewayRouteTablePropagation.Duplicate':
-                    return
-                raise
-        await run_in_executor(callback)
-
-    async def depropagate(self, propagation):
-        '''Disable propagation of routes to table from AwsTransitGatewayAttachment'''
-        # assert hasattr(self, 'propagation'),"You must have propagations"
-        def handler():
-            r = self.client.disable_transit_gateway_route_table_propagation(
+        try:
+            r = self.client.enable_transit_gateway_route_table_propagation(
                 TransitGatewayRouteTableId=self.id,
                 TransitGatewayAttachmentId=propagation.id
             )
-            # self.propagations.remove(propagation)
-        await run_in_executor(callback)
+            if not hasattr(self, 'propagations'):
+                self.propagations = []
+            else:
+                self.propagations.append(propagation)
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'TransitGatewayRouteTablePropagation.Duplicate':
+                return
+            raise
+
+    @callback
+    def depropagate(self, propagation):
+        '''Disable propagation of routes to table from AwsTransitGatewayAttachment'''
+        # assert hasattr(self, 'propagation'),"You must have propagations"
+        r = self.client.disable_transit_gateway_route_table_propagation(
+            TransitGatewayRouteTableId=self.id,
+            TransitGatewayAttachmentId=propagation.id
+        )
+        # self.propagations.remove(propagation)
         
     def do_create(self):
         r = self.client.create_transit_gateway_route_table(
@@ -263,7 +255,6 @@ class AwsTransitGatewayAttachment(AwsClientManaged):
         self.cached = unpack(r)
 
     def _update_attachment_subnets(self):
-
         try:
             reqids = [s.id for s in self.subnets]
             add = list(set(reqids) - set(self.cached.SubnetIds))
@@ -286,10 +277,12 @@ class AwsTransitGatewayAttachment(AwsClientManaged):
             logging.info(f'waiting on tgw_attach: {self}')
             time.sleep(5)
 
+    @callback
+    def async_find_hook(self):
+        self.reload()
+        self._wait_for_ready()
+        self._update_attachment_subnets()
+
     async def post_find_hook(self):
-        def callback():
-            self.reload()
-            self._wait_for_ready()
-            self._update_attachment_subnets()
+        await self.async_find_hook()
         self.tgw.attachments.update({self.id:self})
-        await run_in_executor(callback)
