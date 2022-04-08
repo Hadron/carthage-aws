@@ -39,7 +39,8 @@ def unpack(i, c=0, rk=''):
         return attrs
     elif type(i) is (str or int):
         return i
-    return type(rk[:-1] if rk.endswith('s') else rk, (BaseMob,), {})(attrs)
+    # rk[:-1] if rk.endswith('s') else rk
+    return type(rk, (BaseMob,), {})(attrs)
 
 def find_ipv4_interfaces(machine):
     setattr(machine, 'interfaces', {})
@@ -100,6 +101,18 @@ async def delete_helper(client, kt, ktid, kdel, kdesc, uselist=False):
     if todel:
         kwargs = { ktid+'s': todel }
         getattr(client, kdel)(**kwargs)
+
+# async def remove_vpc_endpoint_service(client):
+#     async def remove_vpce_routes(rts):
+# 
+#     async def remove_vpce(vpce):
+#         client.describe_vpc_endpoints()
+#         client.delete_vpc_endpoints()
+# 
+#     async def remove_vpcsvc(vpcsvc):
+#         client.describe_vpc_endpoint_service_configuration()
+#         client.delete_vpc_endpoint_service_configuration()
+#         client.delete_vpc_endpoint_services()
         
 async def remove_load_balancers(client):
     async def remove_target_groups(lb):
@@ -224,8 +237,6 @@ async def remove_transit_gateways(client):
         
     ats = client.describe_transit_gateway_attachments()['TransitGatewayAttachments']
     rts = client.describe_transit_gateway_route_tables()['TransitGatewayRouteTables']
-        
-    breakpoint()
 
     rtasks = [ delete_route_table(rt) for rt in rts ]
     atasks = [ delete_attachment(at) for at in ats ]
@@ -248,7 +259,12 @@ async def delete_all(connection):
         client = connection.connection.client('ec2')
         elbv2 = connection.connection.client('elbv2')
 
-        # await asyncio.gather(remove_vpns(client), remove_transit_gateways(client), remove_load_balancers(elbv2))
+        await asyncio.gather(
+            remove_vpns(client),
+            remove_transit_gateways(client),
+            remove_load_balancers(elbv2),
+            remove_vpc_endpoint_service(ec2)
+        )
 
         await delete_helper(client, 'NatGateways', 'NatGatewayId', 'delete_nat_gateway', 'describe_nat_gateways')
         await delete_helper(client, 'VpcEndpoints', 'VpcEndpointId', 'delete_vpc_endpoints', 'describe_vpc_endpoints', uselist=True)

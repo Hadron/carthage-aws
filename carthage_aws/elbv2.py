@@ -27,6 +27,11 @@ class AwsLoadBalancer(AwsClientManaged):
     resource_type = 'load_balancer'
     client_type = 'elbv2'
 
+    def private_ip_address(self, subnet_id):
+        ip = [ x.PrivateIpAddress for x in self.interfaces if subnet_id == x.SubnetId ]
+        assert len(ip) == 1,"There should only be one interface in the subnet"
+        return ip[0]
+
     def do_create(self):
         r = self.client.create_load_balancer(
             Name=self.name,
@@ -38,8 +43,15 @@ class AwsLoadBalancer(AwsClientManaged):
         r = r['LoadBalancers'][0]
         self.cache = unpack(r)
         self.arn = self.cache.LoadBalancerArn
+        self.interfaces = [ unpack(x) for x in self.connection.client.describe_network_interfaces()['NetworkInterfaces'] if self.arn.split('/')[-1] in x['Description'] ]
         return self.cache
 
+    async def post_find_hook(self):
+        r = await super().post_find_hook()
+        self.interfaces = [ unpack(x) for x in self.connection.client.describe_network_interfaces()['NetworkInterfaces'] if self.arn.split('/')[-1] in x['Description'] ]
+        return r
+
+    @callback
     def set_subnets(self, *args):
         ''':param: *args must be AwsSubnet(s)
                 This must be the full set of connected subnets
@@ -50,6 +62,7 @@ class AwsLoadBalancer(AwsClientManaged):
             IpAddressType='ipv4'
         )
 
+    @callback
     def enable_cross_zone_load_balancing(self):
         r = self.client.modify_load_balancer_attributes(
             Attributes=[dict(Key='load_balancer.cross_zone.enabled',Value='true')],

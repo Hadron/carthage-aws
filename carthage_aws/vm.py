@@ -126,7 +126,10 @@ class AwsVm(AwsManaged, Machine):
                 'Description': l.interface,
                 'SubnetId': l.net_instance.id,
             }
-            breakpoint()
+            if l.v4_config:
+                if not l.v4_config.dhcp:
+                    assert l.v4_config.address in l.net.v4_config.network.hosts(),f"{l.v4_config.address} is not a hostaddr in {l.net.v4_config.network} for host {self.name}"
+                    d['PrivateIpAddress'] = l.v4_config.address.compressed
             if len(self.network_links) == 1:
                 d['AssociatePublicIpAddress'] = True
             if l.net_instance.vpc.groups:

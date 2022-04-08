@@ -64,7 +64,7 @@ class AwsVpcEndpoint(AwsClientManaged):
 
     @property
     def private_ipv4_address(self):
-        return unpack(self.client.describe_network_interfaces(NetworkInterfaceIds=[self.cache.NetworkInterfaceIds[0]])['NetworkInterfaces'][0]).PrivateIpAddress
+        return self.interface.PrivateIpAddress
 
 
     def do_create(self):
@@ -79,3 +79,8 @@ class AwsVpcEndpoint(AwsClientManaged):
         self.cache = unpack(r)
         self.id = self.cache.VpcEndpointId
         return self.cache
+
+    def find_from_id(self):
+        r = super().find_from_id()
+        self.interface = unpack(self.client.describe_network_interfaces(NetworkInterfaceIds=[self.cache.NetworkInterfaceIds[0]])['NetworkInterfaces'][0])
+        return r

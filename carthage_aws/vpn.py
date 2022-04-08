@@ -15,6 +15,8 @@ from .connection import AwsClientManaged, run_in_executor
 from .transit import AwsTransitGateway
 from .utils import unpack
 
+from xmltodict import parse
+
 import boto3
 from botocore.exceptions import ClientError
 
@@ -108,9 +110,6 @@ class AwsVpnConnection(AwsClientManaged):
         await run_in_executor(callback)
 
     def do_create(self):
-
-        from xmltodict import parse
-
         kwargs = {
             f'{self.tgw.resource_name}Id':self.tgw.id,
             'CustomerGatewayId':self.cust_gw.id,
@@ -126,3 +125,8 @@ class AwsVpnConnection(AwsClientManaged):
         self.cache = unpack(r)
         self.cust_info = unpack(parse(self.cache.CustomerGatewayConfiguration, dict_constructor=dict))
         return self.cache
+
+    async def post_find_hook(self):
+        r = await super().post_find_hook()
+        self.cust_info = unpack(parse(self.cache.CustomerGatewayConfiguration, dict_constructor=dict))
+        return r
