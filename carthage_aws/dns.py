@@ -51,7 +51,6 @@ class AwsHostedZone(AwsManaged):
             name = name[:-1]
         return name.endswith(self.name)
 
-
     def find_from_name(self):
         try:
             # we look for a hosted zone with our exact name
