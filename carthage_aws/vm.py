@@ -5,7 +5,7 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
-import asyncio, time
+import asyncio, contextlib, time
 import yaml
 from pathlib import Path
 from ipaddress import IPv4Address
@@ -92,17 +92,23 @@ class AwsVm(AwsManaged, Machine):
         return res
 
     async def pre_create_hook(self):
-        async with self._operation_lock:
-            if getattr(self.model, 'cloud_init',False):
-                self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
-            else: self.cloud_config = None
-            self.image_id = await self.ainjector.get_instance_async('aws_ami')
-            await self.start_dependencies()
-            await super().start_machine()
-            # Dropping the operation lock at this point is not ideal,
-            # but is probably okay because we should be protected by
-            # the async_ready future
-        
+        # operation lock is held by overriding find_or_create
+        if getattr(self.model, 'cloud_init',False):
+            self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
+        else: self.cloud_config = None
+        self.image_id = await self.ainjector.get_instance_async('aws_ami')
+        await self.start_dependencies()
+        await super().start_machine()
+
+    @setup_task("Create VM", order=AwsManaged.find_or_create.order)
+    async def find_or_create(self, already_locked=False):
+        async with contextlib.AsyncExitStack() as stack:
+            if not already_locked:
+                await stack.enter_async_context(self._operation_lock)
+            return await super().find_or_create()
+
+    find_or_create.check_completed_func = AwsManaged.find_or_create.check_completed_func
+    
             
     def do_create(self):
         network_interfaces = []
@@ -164,8 +170,8 @@ class AwsVm(AwsManaged, Machine):
             await self.start_dependencies()
             await super().start_machine()
             if not self.mob:
-                await self.find_or_create() #presumably create since is_machine_running calls find already
-                await self.is_machine_running
+                await self.find_or_create(already_locked=True) #presumably create since is_machine_running calls find already
+                await self.is_machine_running()
                 if self.running: return
                 logger.info(f'Starting {self.name}')
             await run_in_executor(self.mob.start)

@@ -74,3 +74,13 @@ async def test_attach_volume(carthage_layout):
     finally:
         if vol: await vol.delete()
         await         instance.machine.delete()
+
+@async_test
+async def test_start_machine(carthage_layout):
+    layout = carthage_layout
+    con = await layout.ainjector.get_instance_async(AwsConnection)
+    try:
+        instance =  layout.test_no_ready
+        await instance.machine.start_machine()
+    finally:
+        await instance.machine.delete()
