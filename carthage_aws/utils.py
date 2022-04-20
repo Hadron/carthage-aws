@@ -102,38 +102,100 @@ async def delete_helper(client, kt, ktid, kdel, kdesc, uselist=False):
         kwargs = { ktid+'s': todel }
         getattr(client, kdel)(**kwargs)
 
-# async def remove_vpc_endpoint_service(client):
-#     async def remove_vpce_routes(rts):
-# 
-#     async def remove_vpce(vpce):
-#         client.describe_vpc_endpoints()
-#         client.delete_vpc_endpoints()
-# 
-#     async def remove_vpcsvc(vpcsvc):
-#         client.describe_vpc_endpoint_service_configuration()
-#         client.delete_vpc_endpoint_service_configuration()
-#         client.delete_vpc_endpoint_services()
+async def remove_vpc_endpoint_service(client):
+    async def remove_vpce_routes():
+        vpces = client.describe_vpc_endpoints()['VpcEndpoints']
+        rts = client.describe_route_tables()['RouteTables']
+        for vpce in vpces:
+            for rt in rts:
+                for r in rt['Routes']:
+                    for k, v in r.items():
+                        if 'Gateway' in k:
+                            if v == vpce['VpcEndpointId']:
+                                logging.info(f"Deleting route for {r['DestinationCidrBlock']} -> {vpce['VpcEndpointId']}")
+                                client.delete_route(**dict(
+                                    DestinationCidrBlock=r['DestinationCidrBlock'],
+                                    RouteTableId=rt['RouteTableId']
+                                ))
+
+    async def remove_vpce():
+        vpces = client.describe_vpc_endpoints()['VpcEndpoints']
+        if len(vpces) > 0:
+            logging.info(f"Deleting endpoints {[x['VpcEndpointId'] for x in vpces]}")
+            client.delete_vpc_endpoints(VpcEndpointIds=[x['VpcEndpointId'] for x in vpces])
+
+    async def remove_vpcsvc():
+        vpcsvccons = client.describe_vpc_endpoint_service_configurations()['ServiceConfigurations']
+        if len(vpcsvccons) > 0:
+            logging.info(f"Deleting endpoints {[x['ServiceId'] for x in vpcsvccons]}")
+            client.delete_vpc_endpoint_service_configurations(ServiceIds=[x['ServiceId'] for x in vpcsvccons])
+
+    tasks = []
+    tasks.append(remove_vpce_routes())
+    tasks.append(remove_vpce())
+    tasks.append(remove_vpcsvc())
+    await asyncio.gather(*tasks)
         
 async def remove_load_balancers(client):
-    async def remove_target_groups(lb):
-        tasks = []
-        for tg in client.describe_target_groups(LoadBalancerArn=lb['LoadBalancerArn'])['TargetGroups']:
-            tasks.append(client.delete_target_group(TargetGroupArn=tg['TargetGroupArn']))
-        await asyncio.gather(*tasks)
+
+    async def remove_target_groups():
+        allok = False
+        while not allok:
+            allok = True
+            for tg in client.describe_target_groups()['TargetGroups']:
+                try:
+                    client.delete_target_group(TargetGroupArn=tg['TargetGroupArn'])
+                    logging.info(f"Deleting target group {tg['TargetGroupArn']}")
+                    allok = False
+                except Exception as e:
+                    logging.error(f'{e}')
+            await asyncio.sleep(5)
 
     async def remove_listeners(lb):
         tasks = []
         for li in client.describe_listeners(LoadBalancerArn=lb['LoadBalancerArn'])['Listeners']:
+            logging.info(f"Deleting listener {li['ListenerArn']}")
             tasks.append(client.delete_listener(ListenerArn=li['ListenerArn']))
         await asyncio.gather(*tasks)
 
-    tasks = []
-    for lb in client.describe_load_balancers()['LoadBalancers']:
-        tasks.append(remove_listeners(lb))
-        tasks.append(remove_target_groups(lb))
-        tasks.append(client.delete_load_balancer(LoadBalancerArn=lb['LoadBalancerArn']))
-    await asyncio.gather(*tasks)
+    async def remove_lb():
+        allok = False
+        while not allok:
+            allok = True
+            try:
+                r = client.describe_load_balancers()['LoadBalancers']
+                tasks = []
+                for lb in r:
+                    tasks.append(remove_listeners(lb))
+                await asyncio.gather(*tasks)
+                for lb in r:
+                    if lb['State']['Code'] not in ['deleted', 'deleting']:
+                        logging.info(f"Deleting load balancer {lb['LoadBalancerArn']}")
+                        client.delete_load_balancer(LoadBalancerArn=lb['LoadBalancerArn'])
+                        allok = False
+                await asyncio.sleep(5)
+            except ClientError as e:
+                logging.error(f"{e}")
+                await asyncio.sleep(5)
 
+        alldel = False
+        while not alldel:
+            alldel = True
+            try:
+                r = client.describe_load_balancers()['LoadBalancers']
+                for lb in r:
+                    if r['State']['Code'] in ['deleting']:
+                        logging.info(f'waiting for {lb["LoadBalancerArn"]} to delete')
+                        alldel = False
+                await asyncio.sleep(5)
+            except ClientError as e:
+                logging.error(f'{e}')
+                await asyncio.sleep(5)
+
+    tasks = []
+    tasks.append(remove_target_groups())
+    tasks.append(remove_lb())
+    await asyncio.gather(*tasks)
 
     return
 
@@ -174,23 +236,12 @@ async def remove_vpns(client):
     
 async def remove_transit_gateways(client):
 
-    async def delete_propagation(rt, at):
-        client.disable_transit_gateway_route_table_propagation(
-            TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'],
-            TransitGatewayAttachmentId=at['TransitGatewayAttachmentId']
-        )
-
     async def delete_attachment(at):
         vpntasks = None
         if at['State'] == 'deleted':
             return
         if at['ResourceType'] == 'vpn':
             return
-        rts = client.get_transit_gateway_attachment_propagations(TransitGatewayAttachmentId=at['TransitGatewayAttachmentId'])['TransitGatewayAttachmentPropagations']
-
-        ptasks = [ delete_propagation(rt, at) for rt in rts ]
-
-        await asyncio.gather(*ptasks)
 
         try:
             client.delete_transit_gateway_vpc_attachment(TransitGatewayAttachmentId=at['TransitGatewayAttachmentId'])
@@ -232,8 +283,10 @@ async def remove_transit_gateways(client):
                 r = client.describe_transit_gateway_route_tables(TransitGatewayRouteTableIds=[rt['TransitGatewayRouteTableId']])['TransitGatewayRouteTables'][0]
                 logging.info(f'waiting on {rt["TransitGatewayRouteTableId"]} to delete')
                 await asyncio.sleep(5)
-            except ClientError.InvalidRouteTableId.NotFound as e:
-                break
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'InvalidRouteTableId.NotFound':
+                    break
+                raise
         
     ats = client.describe_transit_gateway_attachments()['TransitGatewayAttachments']
     rts = client.describe_transit_gateway_route_tables()['TransitGatewayRouteTables']
@@ -244,10 +297,15 @@ async def remove_transit_gateways(client):
     await asyncio.gather(*atasks, *rtasks)
 
     for tgw in client.describe_transit_gateways()['TransitGateways']:
-         if tgw['State'] not in ['deleted', 'deleting']:
-             print(f'removing tgw {tgw["TransitGatewayId"]}')
-             client.delete_transit_gateway(TransitGatewayId=tgw['TransitGatewayId'])
-
+        if tgw['State'] not in ['deleted', 'deleting']:
+            print(f'removing tgw {tgw["TransitGatewayId"]}')
+            try:
+                client.delete_transit_gateway(TransitGatewayId=tgw['TransitGatewayId'])
+            except ClientError as e:
+                # it is likely the tgw is shared with us so we can see it but not delete it
+                if e.response['Error']['Code'] == 'InvalidTransitGatewayID.NotFound':
+                    return
+                raise
 
 async def delete_all(connection):
 
@@ -263,7 +321,7 @@ async def delete_all(connection):
             remove_vpns(client),
             remove_transit_gateways(client),
             remove_load_balancers(elbv2),
-            remove_vpc_endpoint_service(ec2)
+            remove_vpc_endpoint_service(client)
         )
 
         await delete_helper(client, 'NatGateways', 'NatGatewayId', 'delete_nat_gateway', 'describe_nat_gateways')
@@ -280,8 +338,16 @@ async def delete_all(connection):
         for ig in ec2.internet_gateways.all():
             action = True
             for a in ig.attachments:
-                ig.detach_from_vpc(VpcId=a['VpcId'])
-            ig.delete()
+                try:
+                    ig.detach_from_vpc(VpcId=a['VpcId'])
+                except ClientError as e:
+                    if e.response['Error']['Code'] == 'DependencyViolation':
+                        pass
+            try:
+                ig.delete()
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'DependencyViolation':
+                    pass
 
         if (errors + removed) == 0:
             break

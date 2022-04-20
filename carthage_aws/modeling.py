@@ -9,8 +9,6 @@ from carthage.modeling.implementation import ModelingContainer, ModelingBase
 from carthage.machine import BaseCustomization
 from carthage.network import V4Config, TechnologySpecificNetwork, this_network
 
-from carthage_base import *
-
 from carthage_aws.network import *
 from carthage_aws.connection import *
 from carthage_aws.vm import *
@@ -37,6 +35,9 @@ class AwsConnectionModel(InjectableModel, metaclass=ModelingBase):
 class AwsVirtualPrivateCloudModel(InjectableModel, metaclass=ModelingBase):
 
     vpc = injector_access(InjectionKey(MachineImplementation))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     @classmethod
     def our_key(self):
@@ -78,7 +79,14 @@ class AwsVpcNetworkModel(NetworkModel):
         return InjectionKey(AwsVpcNetworkModel, name=self.name)
 
     async def async_ready(self):
-        key = InjectionKey(AwsVirtualPrivateCloud, name=self.vpc, _ready=False)
-        obj = await self.ainjector.get_instance_async(key)
+        if isinstance(self.vpc, AwsVirtualPrivateCloudModel):
+            obj = self.vpc.vpc
+        elif isinstance(self.vpc, str):
+            key = InjectionKey(AwsVirtualPrivateCloudModel, name=self.vpc, _ready=False)
+            obj = await self.ainjector.get_instance_async(key)
+            key = InjectionKey(AwsVirtualPrivateCloud, name=self.vpc, _ready=False)
+            obj = await self.ainjector.get_instance_async(key)
+        else:
+            breakpoint()
         self.ainjector.add_provider(InjectionKey(AwsVirtualPrivateCloud), obj)
         await super().async_ready()

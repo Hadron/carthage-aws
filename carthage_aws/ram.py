@@ -24,11 +24,14 @@ class AwsResourceShare(AwsClientManaged):
     resource_type = 'resource_share'
     client_type = 'ram'
 
+    # dev-org 'arn:aws-us-gov:organizations::807241311045:organization/o-yy8ngalms6'
+    # prod-org 'arn:aws-us-gov:organizations::627530914327:organization/o-d1lk8mha82'
+
     def do_create(self):
         r = self.client.create_resource_share(
             name=self.name,
             resourceArns=[self.share],
-            principals=['arn:aws-us-gov:organizations::807241311045:organization/o-yy8ngalms6'],
+            principals=['arn:aws-us-gov:organizations::627530914327:organization/o-d1lk8mha82'],
             tags=[dict(key='Name',value=self.name)]
         )
         r = r['resourceShare']

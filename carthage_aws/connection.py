@@ -465,7 +465,7 @@ class AwsClientManaged(AwsManaged):
             else:
                 r = getattr(self.client, f'describe_{self.resource_type}s').__call__(**{f'{self.resource_name}Ids':[self.id]})
         except ClientError as e:
-            logger.warning(f'Failed to load {self}', exc_info=e)
+            # logger.warning(f'Failed to load {self}', exc_info=e)
             self.cache = None
             if not self.readonly:
                 self.connection.invalid_ec2_resource(self.resource_type, self.id, name=self.name)

@@ -111,8 +111,9 @@ class AwsVirtualPrivateCloud(AwsManaged):
         await run_in_executor(callback)
 
     async def post_find_hook(self):
-        if IPv4Network(self.mob.cidr_block) != IPv4Network(self.model.cidrblock):
-            raise RuntimeError(f'current CIDR for {self.name} ({self.mob.cidr_block}) does not match requested ({self.model.cidrblock})')
+        if hasattr(self, 'model'):
+            if IPv4Network(self.mob.cidr_block) != IPv4Network(self.model.cidrblock):
+                raise RuntimeError(f'current CIDR for {self.name} ({self.mob.cidr_block}) does not match requested ({self.model.cidrblock})')
         
         groups = self.connection.client.describe_security_groups(
             Filters=[dict(Name='vpc-id', Values=[self.id])])

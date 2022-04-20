@@ -82,5 +82,17 @@ class AwsVpcEndpoint(AwsClientManaged):
 
     def find_from_id(self):
         r = super().find_from_id()
-        self.interface = unpack(self.client.describe_network_interfaces(NetworkInterfaceIds=[self.cache.NetworkInterfaceIds[0]])['NetworkInterfaces'][0])
+        # FIXME
+        # should we wait here?
+        try:
+            self.interface = unpack(self.client.describe_network_interfaces(NetworkInterfaceIds=[self.cache.NetworkInterfaceIds[0]])['NetworkInterfaces'][0])
+        except Exception as e:
+            breakpoint()
         return r
+
+    async def post_find_hook(self):
+        while True:
+            state = self.client.describe_vpc_endpoints(VpcEndpointIds=[self.id])['VpcEndpoints'][0]['State']
+            if state == 'available': break
+            print(f'waiting on vpce: {self}')
+            await asyncio.sleep(5)

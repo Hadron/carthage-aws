@@ -161,7 +161,10 @@ class AwsVm(AwsManaged, Machine):
             )
             self.id = r['Instances'][0]['InstanceId']
         except ClientError as e:
-            logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
+            if e.response['Error']['Code'] == 'InvalidIPAddress.InUse':
+                logging.error(f"{e.response['Error']['Message']} for host {self.name}")
+            else:
+                logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
             return True
 
     def find_from_id(self):

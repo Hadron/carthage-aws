@@ -47,6 +47,11 @@ class AwsLoadBalancer(AwsClientManaged):
         return self.cache
 
     async def post_find_hook(self):
+        while True:
+            state = self.client.describe_load_balancers(LoadBalancerArns=[self.arn])['LoadBalancers'][0]['State']['Code']
+            if state == 'active': break
+            print(f'waiting on tgw: {self}')
+            await asyncio.sleep(5)
         r = await super().post_find_hook()
         self.interfaces = [ unpack(x) for x in self.connection.client.describe_network_interfaces()['NetworkInterfaces'] if self.arn.split('/')[-1] in x['Description'] ]
         return r
