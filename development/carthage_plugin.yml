@@ -1,6 +1,8 @@
 name: aws_development
 python: .
 config:
+  plugins:
+  - https://github.com/hadron/carthage_base
   layout_name: aws_development
   aws:
     region: us-east-1

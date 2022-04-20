@@ -5,7 +5,8 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
-import asyncio, time
+import asyncio, contextlib, time
+import warnings
 import yaml
 from pathlib import Path
 from ipaddress import IPv4Address
@@ -13,10 +14,9 @@ from ipaddress import IPv4Address
 from carthage import *
 from carthage.modeling import *
 from carthage.dependency_injection import *
-from carthage.vm import vm_image
-from carthage.config import ConfigLayout
 from carthage.machine import Machine
 from carthage.network import NetworkConfig, NetworkLink
+from carthage.local import LocalMachineMixin
 from carthage.cloud_init import generate_cloud_init_cloud_config
 import logging
 
@@ -33,7 +33,46 @@ class UserDataProvider(Injectable):
     async def generate_user_data(self):
         raise NotImplementedError
 
-@inject_autokwargs(connection=InjectionKey(AwsConnection))
+
+@inject(
+    connection=AwsConnection,
+    ami=InjectionKey('aws_ami'),
+    model=AbstractMachineModel,
+    volume_type=InjectionKey('aws_volume_type', _optional=True),
+    )
+async def generate_block_device_mappings(connection, ami, model, volume_type):
+    if volume_type is None: volume_type ='gp2'
+    services =         connection .connection.resource('ec2', region_name=connection.region)
+    image = services.Image(ami)
+    mappings = []
+    disk_sizes = model.disk_sizes
+    disk_name = '/dev/xvda'
+    i = 0
+    for i, mapping in enumerate(image.block_device_mappings):
+        if i >= len(disk_sizes): break
+        if 'Ebs' not in mapping: continue
+        if mapping['Ebs']['VolumeSize'] > disk_sizes[i]:
+            warnings.warn(f'{model}: disk size entry {i} size {disk_sizes[i]} less than image size {mapping["Ebs"]["VolumeSize"]}')
+            continue
+        disk_name=mapping['DeviceName']
+        mappings.append(dict(
+            DeviceName=mapping['DeviceName'],
+            Ebs=dict(
+                VolumeSize=disk_sizes[i])))
+    for i, size in enumerate(disk_sizes):
+        if i < len(mappings): continue
+        disk_name = disk_name[:-1]+chr(ord(disk_name[-1])+1)
+        mappings.append(dict(
+            DeviceName=disk_name,
+            Ebs=dict(
+                VolumeSize=disk_sizes[i],
+                DeleteOnTermination=True,
+                VolumeType=volume_type)))
+    return mappings
+    
+
+@inject_autokwargs(connection=InjectionKey(AwsConnection),
+                   )
 class AwsVm(AwsManaged, Machine):
 
     pass_name_to_super = True
@@ -55,6 +94,7 @@ class AwsVm(AwsManaged, Machine):
                     adl_keys=[InjectionKey(NetworkLink, host=self.name)])
                 
         updated_links = []
+        update_ip_address = False
         if self.__class__.ip_address is Machine.ip_address:
             try:
                 self.ip_address
@@ -95,27 +135,37 @@ class AwsVm(AwsManaged, Machine):
         return res
 
     async def pre_create_hook(self):
-        async with self._operation_lock:
-
-            if hasattr(self.model, 'provide_user_data'):
-                if hasattr(self.model, 'cloud_init'):
-                    logging.warning(f'{self.model} provides both cloud_init and provide_user_data; ignoring cloud_init')
-                self.user_data = await (await self.ainjector.get_instance_async(InjectionKey(UserDataProvider, _ready=True))).generate_user_data()
-                self.cloud_config = None
+        # operation lock is held by overriding find_or_create
+        if hasattr(self.model, 'provide_user_data'):
+            if hasattr(self.model, 'cloud_init'):
+                logging.warning(f'{self.model} provides both cloud_init and provide_user_data; ignoring cloud_init')
+            self.user_data = await (await self.ainjector.get_instance_async(InjectionKey(UserDataProvider, _ready=True))).generate_user_data()
+            self.cloud_config = None
+        else:
+            self.user_data = None
+            if getattr(self.model, 'cloud_init', False):
+                self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
             else:
-                self.user_data = None
-                if getattr(self.model, 'cloud_init', False):
-                    self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
-                else:
-                    self.cloud_config = None
+                self.cloud_config = None
 
-            self.image_id = await self.ainjector.get_instance_async('aws_ami')
-            await self.start_dependencies()
-            await super().start_machine()
-            # Dropping the operation lock at this point is not ideal,
-            # but is probably okay because we should be protected by
-            # the async_ready future
+        self.image_id = await self.ainjector.get_instance_async('aws_ami')
+        await self.start_dependencies()
+        await super().start_machine()
+        if hasattr(self.model, 'disk_sizes'):
+            self.block_device_mappings = await self.ainjector(generate_block_device_mappings)
+        else: self.block_device_mappings = None
+
         
+
+    @setup_task("Create VM", order=AwsManaged.find_or_create.order)
+    async def find_or_create(self, already_locked=False):
+        async with contextlib.AsyncExitStack() as stack:
+            if not already_locked:
+                await stack.enter_async_context(self._operation_lock)
+            return await super().find_or_create()
+
+    find_or_create.check_completed_func = AwsManaged.find_or_create.check_completed_func
+    
             
     def do_create(self):
         network_interfaces = []
@@ -148,11 +198,12 @@ class AwsVm(AwsManaged, Machine):
             extra = {}
             key_name = self._gfi('aws_key_name', default=None)
             if key_name: extra['KeyName'] = key_name
+            if self.block_device_mappings:
+                extra['BlockDeviceMappings'] = self.block_device_mappings
             r = self.connection.client.run_instances(
                 ImageId=self.image_id,
                 MinCount=1,
                 MaxCount=1,
-                # BootMode='uefi',
                 InstanceType=self._gfi('aws_instance_type'),
                 UserData=user_data,
                 NetworkInterfaces=network_interfaces,
@@ -186,8 +237,8 @@ class AwsVm(AwsManaged, Machine):
             await self.start_dependencies()
             await super().start_machine()
             if not self.mob:
-                await self.find_or_create() #presumably create since is_machine_running calls find already
-                await self.is_machine_running
+                await self.find_or_create(already_locked=True) #presumably create since is_machine_running calls find already
+                await self.is_machine_running()
                 if self.running: return
                 logger.info(f'Starting {self.name}')
             await run_in_executor(self.mob.start)
@@ -201,6 +252,7 @@ class AwsVm(AwsManaged, Machine):
             if not self.running:
                 return
             await run_in_executor(self.mob.stop)
+            await run_in_executor(self.mob.wait_until_stopped)
             if self._clear_ip_address:
                 del self.ip_address
             self.running = False
@@ -221,4 +273,21 @@ class AwsVm(AwsManaged, Machine):
         
     stamp_type = 'vm'
     resource_type = 'instance'
-    
+
+@inject()
+class  LocalAwsVm(LocalMachineMixin, AwsVm): pass
+
+__all__ += ['LocalAwsVm']
+
+try:
+    import carthage_base.hosted
+    class MaybeLocalAwsVm(carthage_base.hosted.BareOrLocal):
+        implementation = LocalAwsVm
+        remote_implementation = AwsVm
+
+except ImportError:
+    class MaybeLocalAwsVm(Injectable):
+        def __new__(cls, *args, **kwargs):
+            raise NotImplementedError('MaybeLocalAwsVm requires carthage_base available')
+
+__all__ += ['MabyLocalAwsVm']

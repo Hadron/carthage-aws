@@ -370,7 +370,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
     @memoproperty
     def stamp_path(self):
         p = Path(self.config_layout.state_dir)
-        p = p.joinpath("aws_stamps", self.stamp_type+".stamps")
+        p = p.joinpath("aws_stamps", self.stamp_type,str(self.id)+".stamps")
         os.makedirs(p, exist_ok=True)
         return p
 

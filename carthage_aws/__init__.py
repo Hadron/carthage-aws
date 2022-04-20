@@ -22,11 +22,11 @@ __all__ += ['AwsVirtualPrivateCloud', 'AwsSubnet']
 from .dns import AwsHostedZone, AwsDnsManagement
 __all__ += ['AwsHostedZone', 'AwsDnsManagement']
 
-from .vm import AwsVm
-__all__ += ['AwsVm']
+from .vm import AwsVm, MaybeLocalAwsVm
+__all__ += ['AwsVm', 'MaybeLocalAwsVm']
 
-from .image import image_provider, debian_ami_owner
-__all__ += ['image_provider', 'debian_ami_owner']
+from .image import image_provider, debian_ami_owner, ImageBuilderVolume, AttachImageBuilderVolume, build_ami
+__all__ += ['image_provider', 'debian_ami_owner', 'AttachImageBuilderVolume', 'ImageBuilderVolume', 'build_ami']
 
 from .ebs import AwsVolume
 __all__ += ['AwsVolume']
