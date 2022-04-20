@@ -6,6 +6,7 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
 import asyncio, contextlib, time
+import warnings
 import yaml
 from pathlib import Path
 from ipaddress import IPv4Address
@@ -26,7 +27,42 @@ from .network import AwsVirtualPrivateCloud, AwsSubnet
 
 __all__ = ['AwsVm']
 
-
+@inject(
+    connection=AwsConnection,
+    ami=InjectionKey('aws_ami'),
+    model=AbstractMachineModel,
+    volume_type=InjectionKey('aws_volume_type', _optional=True),
+    )
+async def generate_block_device_mappings(connection, ami, model, volume_type):
+    if volume_type is None: volume_type ='gp2'
+    services =         connection .connection.resource('ec2', region_name=connection.region)
+    image = services.Image(ami)
+    mappings = []
+    disk_sizes = model.disk_sizes
+    disk_name = '/dev/xvda'
+    i = 0
+    for i, mapping in enumerate(image.block_device_mappings):
+        if i >= len(disk_sizes): break
+        if 'Ebs' not in mapping: continue
+        if mapping['Ebs']['VolumeSize'] > disk_sizes[i]:
+            warnings.warn(f'{model}: disk size entry {i} size {disk_sizes[i]} less than image size {mapping["Ebs"]["VolumeSize"]}')
+            continue
+        disk_name=mapping['DeviceName']
+        mappings.append(dict(
+            DeviceName=mapping['DeviceName'],
+            Ebs=dict(
+                VolumeSize=disk_sizes[i])))
+    for i, size in enumerate(disk_sizes):
+        if i < len(mappings): continue
+        disk_name = disk_name[:-1]+chr(ord(disk_name[-1])+1)
+        mappings.append(dict(
+            DeviceName=disk_name,
+            Ebs=dict(
+                VolumeSize=disk_sizes[i],
+                DeleteOnTermination=True,
+                VolumeType=volume_type)))
+    return mappings
+    
 
 @inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True),
                    )
@@ -99,6 +135,10 @@ class AwsVm(AwsManaged, Machine):
         self.image_id = await self.ainjector.get_instance_async('aws_ami')
         await self.start_dependencies()
         await super().start_machine()
+        if hasattr(self.model, 'disk_sizes'):
+            self.block_device_mappings = await self.ainjector(generate_block_device_mappings)
+        else: self.block_device_mappings = None
+        
 
     @setup_task("Create VM", order=AwsManaged.find_or_create.order)
     async def find_or_create(self, already_locked=False):
@@ -135,7 +175,8 @@ class AwsVm(AwsManaged, Machine):
             extra = {}
             key_name = self._gfi('aws_key_name', default=None)
             if key_name: extra['KeyName'] = key_name
-
+            if self.block_device_mappings:
+                extra['BlockDeviceMappings'] = self.block_device_mappings
             r = self.connection.client.run_instances(
                 ImageId=self.image_id,
                 MinCount=1,

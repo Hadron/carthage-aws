@@ -34,6 +34,7 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
         name="test-vm"
         cloud_init = True
         aws_instance_type = "t2.micro"
+        disk_sizes = (20,80)
 
     class test_no_ready(MachineModel):
         name="test-vm-no-ready"

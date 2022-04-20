@@ -29,7 +29,7 @@ def carthage_layout(loop):
     loop.run_until_complete(shutdown_injector(ainjector))
 
 @async_test
-async def test_start_machine(carthage_layout):
+async def test_base_vm(carthage_layout):
     layout = carthage_layout
     try:
         await layout.generate()
