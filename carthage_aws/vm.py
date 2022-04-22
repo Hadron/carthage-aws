@@ -133,6 +133,7 @@ class AwsVm(AwsManaged, Machine):
             self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
         else: self.cloud_config = None
         self.image_id = await self.ainjector.get_instance_async('aws_ami')
+        self.iam_profile = await self.ainjector.get_instance_async(InjectionKey("aws_iam_profile", _optional=True))
         await self.start_dependencies()
         await super().start_machine()
         if hasattr(self.model, 'disk_sizes'):
@@ -183,6 +184,8 @@ class AwsVm(AwsManaged, Machine):
             if key_name: extra['KeyName'] = key_name
             if self.block_device_mappings:
                 extra['BlockDeviceMappings'] = self.block_device_mappings
+            if self.iam_profile:
+                extra['IamInstanceProfile'] = dict(Name=self.iam_profile)
             r = self.connection.client.run_instances(
                 ImageId=self.image_id,
                 MinCount=1,
