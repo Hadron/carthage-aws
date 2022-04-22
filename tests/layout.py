@@ -5,9 +5,11 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
-
+import os
+from pathlib import Path
 from carthage import *
 from carthage_aws import *
+from carthage_base import CarthageServerRole, DebianImage
 from carthage.modeling import *
 from carthage.cloud_init import WriteAuthorizedKeysPlugin
 
@@ -15,6 +17,7 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
 
     layout_name = 'aws_test'
 
+    add_provider(DebianImage)
     add_provider(machine_implementation_key, dependency_quote(AwsVm))
     add_provider(InjectionKey(AwsHostedZone),
                  when_needed(AwsHostedZone, name="autotest.photon.ac"))
@@ -63,3 +66,27 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
             volume_size = 4
             name = "attach_me"
             
+
+    class image_builder(CarthageServerRole, MachineModel, SetupTaskMixin, AsyncInjectable):
+        add_provider(machine_implementation_key, MaybeLocalAwsVm)
+        cloud_init = True
+
+        aws_instance_type = 't3.medium'
+        name = 'image-builder'
+        layout_source = os.path.dirname(__file__)
+        layout_destination = "carthage_aws"
+        aws_image_size = 8
+        aws_iam_profile = "ec2_full"
+        config_info = mako_task("config.yml.mako", output="carthage_aws/config.yml", config=InjectionKey(ConfigLayout))
+
+        class install(MachineCustomization):
+
+            @setup_task("install software")
+            async def install_software(self):
+                await self.ssh("apt -y install python3-pip rsync python3-pytest ansible",
+                               _bg=True, _bg_exc=False)
+                await self.ssh("pip3 install boto3", _bg=True, _bg_exc=False)
+                await self.ssh('systemctl enable --now systemd-resolved', _bg=True, _bg_exc=False)
+
+            install_mako = install_mako_task('model')
+

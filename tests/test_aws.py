@@ -14,20 +14,6 @@ from carthage_aws import *
 from carthage.modeling import *
 from carthage.pytest import *
 
-# The boto logging is way too verbose
-logging.getLogger('boto3').setLevel(logging.WARNING)
-logging.getLogger('botocore').setLevel(logging.WARNING)
-
-from layout import test_layout
-@pytest.fixture(scope='session')
-def carthage_layout(loop):
-    injector = base_injector.claim("AWS Layout")
-    ainjector = injector(AsyncInjector)
-    ainjector.add_provider(InjectionKey(CarthageLayout), test_layout)
-    layout = loop.run_until_complete(ainjector.get_instance_async(CarthageLayout))
-    yield layout
-    loop.run_until_complete(shutdown_injector(ainjector))
-
 @async_test
 async def test_base_vm(carthage_layout):
     layout = carthage_layout
@@ -82,5 +68,25 @@ async def test_start_machine(carthage_layout):
     try:
         instance =  layout.test_no_ready
         await instance.machine.start_machine()
+    finally:
+        await instance.machine.delete()
+
+@async_test
+async def test_image_building(carthage_layout, request):
+    layout = carthage_layout
+    con = await layout.ainjector.get_instance_async(AwsConnection)
+    try:
+        instance =  layout.image_builder
+        await instance.async_become_ready()
+        await instance.machine.async_become_ready()
+        #instance.machine.ssh('-A', _fg=True)
+        #breakpoint()
+        await subtest_controller(
+            request, instance.machine,
+            ["--carthage-config=/carthage_aws/config.yml",
+             "/carthage_aws/tests/inner_image_builder.py"],
+            python_path="/carthage:/carthage_aws",
+            ssh_agent=True)
+        
     finally:
         await instance.machine.delete()
