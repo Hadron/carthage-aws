@@ -108,7 +108,7 @@ class AwsHostedZone(AwsManaged):
             self.id = r['HostedZone']['Id'][12:]
             self.config = r['HostedZone']['Config']
             self.nameservers = r['DelegationSet']['NameServers']
-            self.name = r['HostedZone']['Name']
+            self.name = r['HostedZone']['Name'][:-1]
         except ClientError as e:
             logger.error(f'Could not create AwsHostedZone for \
 {self.name} because {e}.')
