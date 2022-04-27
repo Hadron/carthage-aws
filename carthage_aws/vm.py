@@ -289,4 +289,4 @@ except ImportError:
         def __new__(cls, *args, **kwargs):
             raise NotImplementedError('MaybeLocalAwsVm requires carthage_base available')
 
-__all__ += ['MabyLocalAwsVm']
+__all__ += ['MaybeLocalAwsVm']
