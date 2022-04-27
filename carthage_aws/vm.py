@@ -191,7 +191,6 @@ class AwsVm(AwsManaged, Machine):
         if (user_data is None) and self.cloud_config:
             user_data = "#cloud-config\n" + \
                 yaml.dump(self.cloud_config.user_data, default_flow_style=False)
-            
         logger.info(f'Starting {self.name} with {user_data}')
 
         try:

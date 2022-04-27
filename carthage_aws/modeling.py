@@ -36,9 +36,6 @@ class AwsVirtualPrivateCloudModel(InjectableModel, metaclass=ModelingBase):
 
     vpc = injector_access(InjectionKey(MachineImplementation))
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
     @classmethod
     def our_key(self):
         return InjectionKey(AwsVirtualPrivateCloudModel, name=self.name)
@@ -55,6 +52,7 @@ class AwsVirtualPrivateCloudModel(InjectableModel, metaclass=ModelingBase):
         self.injector.add_provider(config_key('aws.vpc_cidr'), self.cidrblock)
         self.injector.add_provider(InjectionKey(MachineModel), self)
         self.injector.add_provider(InjectionKey(AwsVirtualPrivateCloud), MachineImplementation)
+
 
 class AwsKeyPairModel(InjectableModel, metaclass=ModelingBase):
 
