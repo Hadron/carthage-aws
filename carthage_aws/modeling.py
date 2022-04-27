@@ -88,3 +88,12 @@ class AwsVpcNetworkModel(NetworkModel):
             breakpoint()
         self.ainjector.add_provider(InjectionKey(AwsVirtualPrivateCloud), obj)
         await super().async_ready()
+
+    # self_provider(InjectionKey(AwsVpcNetworkModel))
+
+    # @provides(InjectionKey(AwsVirtualPrivateCloud))
+    # @inject(model=AwsVpcNetworkModel)
+    # async def _find_vpc(model):
+    #     # look at self.vpc, figure out what you want and return it
+    #     breakpoint()
+    #     pass   
