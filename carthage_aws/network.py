@@ -61,6 +61,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
             raise ValueError("You must specify either an AWS VPC ID or VPC name.")
 
         self.groups = []
+        self._subnets = []
 
     def do_create(self):
         r = self.connection.client.create_vpc(
@@ -75,7 +76,11 @@ class AwsVirtualPrivateCloud(AwsManaged):
 
     @property
     def subnets(self):
-        return [ x for x in self.mob.subnets.all() ]
+        return self._subnets
+
+    def add_subnet(self, subnet):
+        assert subnet.vpc.id == self.id,f"{subnet} does not belong to {self}"
+        self._subnets.append(subnet)
 
     async def main_route_table(self):
         r = self.connection.client.describe_route_tables(
@@ -144,6 +149,8 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
         super().__init__( **kwargs)
         self.groups = self.vpc.groups
         self.name = self.network.name
+        if hasattr(self.network, 'az'):
+            self.az = self.network.az
 
     async def find(self):
         if self.id: return await run_in_executor(self.find_from_id)
@@ -168,6 +175,8 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
         self.mob.route_tables.all()
 
     async def post_find_hook(self):
+        if self not in self.vpc.subnets:
+            self.vpc.add_subnet(self)
         return
         self.mob.association.delete()
 
