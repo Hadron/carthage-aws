@@ -30,7 +30,7 @@ class AwsResourceShare(AwsClientManaged):
     def do_create(self):
         r = self.client.create_resource_share(
             name=self.name,
-            resourceArns=[self.share],
+            resourceArns=[x for x in self.share],
             # TODO: Pull principal string from config.yml
             principals=['arn:aws-us-gov:organizations::627530914327:organization/o-d1lk8mha82'],
             tags=[dict(key='Name',value=self.name)]

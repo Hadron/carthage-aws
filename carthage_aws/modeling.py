@@ -80,8 +80,8 @@ class AwsVpcNetworkModel(NetworkModel):
         if isinstance(self.vpc, AwsVirtualPrivateCloudModel):
             obj = self.vpc.vpc
         elif isinstance(self.vpc, str):
-            key = InjectionKey(AwsVirtualPrivateCloudModel, name=self.vpc, _ready=False)
-            obj = await self.ainjector.get_instance_async(key)
+            # key = InjectionKey(AwsVirtualPrivateCloudModel, name=self.vpc, _ready=False)
+            # obj = await self.ainjector.get_instance_async(key)
             key = InjectionKey(AwsVirtualPrivateCloud, name=self.vpc, _ready=False)
             obj = await self.ainjector.get_instance_async(key)
         else:

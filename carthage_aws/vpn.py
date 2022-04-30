@@ -35,25 +35,6 @@ class AwsCustomerGateway(AwsClientManaged):
         self.name = name
         self.public_ipv4 = public_ipv4
 
-    async def create_vpn(self, gw):
-        '''Provided an AwsTransitGateway or AwsVpnGateway, create a vpn endpoint'''
-        resource_name = f'{gw.resource_name}Id'
-
-        kwargs = dict(
-            resource_name=gw.id,
-            CustomerGatewayId=self.id,
-            Type='ipsec.1',
-            Options=dict(
-               EnableAcceleration=False,
-               StaticRoutesOnly=False,
-               TunnelInsideIpVersion='ipv4',
-               TagSpecifications=[self.resource_tags]
-            )
-        )
-        def callback():
-            r = self.client.create_vpn_connection(**kwargs)
-        await run_in_executor(callback)
-
     def do_create(self):
         r = self.client.create_customer_gateway(
             BgpAsn=int(self.asn),
@@ -87,40 +68,44 @@ class AwsVpnConnection(AwsClientManaged):
     
     resource_type = 'vpn_connection'
 
+    okw = ['TunnelInsideCidr', 'TunnelInsideIpv6Cidr', 'PreSharedKey', 'Phase1LifetimeSeconds',
+            'Phase2LifetimeSeconds', 'RekeyMarginTimeSeconds', 'RekeyFuzzPercentage', 'ReplayWindowSize',
+            'DPDTimeoutSeconds', 'DPDTimeoutAction']
+
+    oda = ['Phase1EncryptionAlgorithms', 'Phase2EncryptionAlgorithms', 'Phase1IntegrityAlgorithms',
+            'Phase2IntegrityAlgorithms', 'Phase1DHGroupNumbers', 'Phase2DHGroupNumbers', 'IKEVersions']
+
     def __init__(self, **kwargs):
+        self.kwopts = {}
+        for kw in self.okw:
+            if kw in kwargs:
+                self.kwopts[kw] = kwargs.pop(kw)
+        for kw in self.oda:
+            if kw in kwargs:
+                k = kwargs.pop(kw)
+                if type(k) is list:
+                    k = [ dict(Value=x) for x in k ]
+                else:
+                    k = [ dict(Value=k) ]
+                self.kwopts[kw] = k
         super().__init__(**kwargs)
 
-    async def create_vpn(self, gw):
-        '''Provided an AwsTransitGateway or AwsVpnGateway, create a vpn endpoint'''
-        resource_name = f'{gw.resource_name}Id'
-
-        kwargs = dict(
-            resource_name=gw.id,
-            CustomerGatewayId=self.cust_gw.id,
-            Type='ipsec.1',
-            Options=dict(
-               EnableAcceleration=False,
-               StaticRoutesOnly=False,
-               TunnelInsideIpVersion='ipv4',
-               TagSpecifications=[self.resource_tags]
-            )
-        )
-        def callback():
-            r = self.client.create_vpn_connection(**kwargs)
-        await run_in_executor(callback)
-
     def do_create(self):
+        options = {
+           'EnableAcceleration':False,
+           'StaticRoutesOnly':False,
+           'TunnelInsideIpVersion':'ipv4'
+        }
+        if len(self.kwopts.keys()) > 0:
+            options['TunnelOptions'] = [self.kwopts, self.kwopts]
         kwargs = {
             f'{self.tgw.resource_name}Id':self.tgw.id,
             'CustomerGatewayId':self.cust_gw.id,
             'Type':'ipsec.1',
-            'Options':{
-               'EnableAcceleration':False,
-               'StaticRoutesOnly':False,
-               'TunnelInsideIpVersion':'ipv4',
-            },
-           'TagSpecifications':[self.resource_tags]
+            'TagSpecifications':[self.resource_tags]
         }
+        kwargs['Options'] = options
+
         r = self.client.create_vpn_connection(**kwargs)['VpnConnection']
         self.cache = unpack(r)
         self.cust_info = unpack(parse(self.cache.CustomerGatewayConfiguration, dict_constructor=dict))
