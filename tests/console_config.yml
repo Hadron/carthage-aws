@@ -2,6 +2,9 @@ plugins:
 - .
 aws:
   region: us-east-1
+  tags:
+    stack_name: 'test-stack-name'
+    stack_id: 'id-test-abc123'
 base_dir: /tmp/carthage-base
 checkout_dir: /tmp/carthage-base/checkout
 layout_name:  aws_test
