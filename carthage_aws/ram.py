@@ -32,7 +32,7 @@ class AwsResourceShare(AwsClientManaged):
             name=self.name,
             resourceArns=[self.share],
             # TODO: Pull principal string from config.yml
-            principals=['arn:aws-us-gov:organizations::627530914327:organization/o-d1lk8mha82'],
+            principals=['arn:aws-us-gov:organizations::807241311045:organization/o-yy8ngalms6'],
             tags=[dict(key='Name',value=self.name)]
         )
         r = r['resourceShare']
