@@ -165,14 +165,23 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
     def service_resource(self):
         # override for non-ec2
         return self.connection.connection.resource('ec2', region_name=self.connection.region)
+        
+    def _our_tags(self):
+        from .tag import AwsTagsProvider
+
+        try:
+            tags = self.injector.get_instance(InjectionKey(AwsTagsProvider)).tags
+        except KeyError as e:
+            logger.info(f'{e} for {self.name}')
+            tags = {}
+        if self.name:
+            tags['Name'] = self.name
+
+        return [ dict(Key=k,Value=v) for k,v in tags.items() ]
 
     @property
     def resource_tags(self):
-        tags = []
-        if self.name:
-            tags.append(dict(Key="Name", Value=self.name))
-        return dict(ResourceType=self.resource_type,
-                    Tags=tags)
+        return dict(ResourceType=self.resource_type, Tags=self._our_tags())
     
     def find_from_id(self):
         #called in executor context; create a mob from id
