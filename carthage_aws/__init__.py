@@ -31,6 +31,9 @@ __all__ += ['image_provider', 'debian_ami_owner', 'AttachImageBuilderVolume', 'I
 from .ebs import AwsVolume
 __all__ += ['AwsVolume']
 
+from .tag import AwsTagsProvider
+__all__ += ['AwsTagsProvider']
+
 class AwsConfig(ConfigSchema, prefix = "aws"):
     #:aws_access_key_id
     access_key_id: ConfigString
@@ -48,7 +51,16 @@ class AwsConfig(ConfigSchema, prefix = "aws"):
     vpc_id: ConfigString
     #: CIDR block to allocate to created VPC
     vpc_cidr: IPv4Network = IPv4Network('192.168.0.0/16')
-    
+
+class AwsTags(ConfigSchema, prefix='aws.tags'):
+    #:carthage:cloudformation:stack_name:
+    stack_name: ConfigString
+
+    #:carthage:cloudformation:stack_id:
+    stack_id: ConfigString
+
+    #:carthage:cloudformation:logical_id:
+    logical_id: ConfigString
 
 @inject(injector=Injector)
 def enable_new_aws_connection(injector):
