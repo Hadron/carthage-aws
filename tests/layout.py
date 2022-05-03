@@ -36,6 +36,14 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
         aws_instance_type = "t2.micro"
         disk_sizes = (20,80)
 
+        class static_ip_net_config(NetworkConfigModel):
+            add('eth0', mac=None, net=InjectionKey("our_net"),
+                v4_config=V4Config(
+                    dhcp=False,
+                    address='192.168.100.237'
+                )
+            )
+
     class test_no_ready(MachineModel):
         name="test-vm-no-ready"
         cloud_init = True
