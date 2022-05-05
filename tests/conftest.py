@@ -24,4 +24,16 @@ def carthage_layout(loop):
     loop.run_until_complete(lainjector.get_instance_async(AwsConnection))
     loop.run_until_complete(lainjector.get_instance_async(carthage.ssh.SshKey))
     yield layout
+    loop.run_until_complete(lainjector(cleanup))
     loop.run_until_complete(shutdown_injector(ainjector))
+
+@inject(ainjector=AsyncInjector)
+async def cleanup(ainjector):
+    from carthage_aws import AwsImage
+    try:
+        while True:
+            image = await ainjector(AwsImage, name='test-ami*')
+            await image.delete()
+    except NotImplementedError:
+        pass
+    

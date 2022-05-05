@@ -11,7 +11,7 @@ from carthage import *
 from carthage.debian import *
 from carthage.modeling import *
 from carthage import sh
-from .connection import AwsConnection, run_in_executor
+from .connection import AwsConnection, run_in_executor, AwsManaged
 from .ebs import AwsVolume
 
 __all__ = []
@@ -58,6 +58,36 @@ __all__ += ['image_provider']
 debian_ami_owner ='136693071363'
 
 __all__ += ['debian_ami_owner']
+
+class AwsImage(AwsManaged):
+    resource_type = 'image'
+    readonly = True
+
+    async def possible_ids_for_name(self):
+        objs = self.connection.client.describe_images(
+            Owners=['self'],
+            Filters=[dict(
+                Name='name',
+                Values=[self.name])])
+        return map(lambda o: o['ImageId'], objs['Images'])
+
+    async def get_snapshots(self):
+        def callback():
+            mappings = self.mob.block_device_mappings
+            results = []
+            for m in mappings:
+                if 'Ebs' in m:
+                    results.append(self.service_resource.Snapshot(m['Ebs']['SnapshotId']))
+            return results
+        return await run_in_executor(callback)
+
+    async def delete(self):
+        snapshots = await self.get_snapshots()
+        await run_in_executor(self.mob.deregister)
+        for s in snapshots:
+            await run_in_executor(s.delete)
+
+__all__ += ['AwsImage']
 
 @inject(model=AbstractMachineModel,
         volume_size=InjectionKey("aws_image_size"))

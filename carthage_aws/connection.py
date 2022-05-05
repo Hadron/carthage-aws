@@ -25,7 +25,8 @@ resource_factory_methods = dict(
     instance='Instance',
     vpc='Vpc',
     subnet='Subnet',
-    volume='Volume'
+    volume='Volume',
+    image='Image',
 )
 
 async def run_in_executor(func, *args):
@@ -201,18 +202,21 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         if self.id:
             return await run_in_executor(self.find_from_id)
         elif self.name:
-            resource_type = self.resource_type
-            names = self.connection.names_by_resource_type[resource_type]
-            if self.name in names:
-                objs = names[self.name]
-                for obj in objs:
-                    # use the first viable
-                    self.id = obj['ResourceId']
-                    await run_in_executor(self.find_from_id)
-                    if self.mob:
-                        return
+            for id in await self.possible_ids_for_name():
+                # use the first viable
+                self.id = id
+                await run_in_executor(self.find_from_id)
+                if self.mob:
+                    return
             self.id = None
 
+    async def possible_ids_for_name(self):
+        resource_type = self.resource_type
+        names = self.connection.names_by_resource_type[resource_type]
+        if self.name in names:
+            objs = names[self.name]
+            return [obj['ResourceId'] for obj in objs]
+        return []
     @setup_task("construct")
     async def find_or_create(self):
         if self.mob: return
