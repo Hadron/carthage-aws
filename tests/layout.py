@@ -67,7 +67,12 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
             name = "attach_me"
             
 
-    class image_builder(CarthageServerRole, MachineModel, SetupTaskMixin, AsyncInjectable):
+    # The layout already has AnsibleModelMixin, but this will force a
+    # new inventory generation when image_builder is built.
+    # Alternatively we would need to wait for dns to catch up and have
+    # a non-dns option when tests are run by individual developers who
+    # don't have access to the carthage-ci dns zone.
+    class image_builder(CarthageServerRole, MachineModel, AnsibleModelMixin, SetupTaskMixin, AsyncInjectable):
         add_provider(machine_implementation_key, MaybeLocalAwsVm)
         cloud_init = True
 
