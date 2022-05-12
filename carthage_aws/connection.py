@@ -110,15 +110,18 @@ class AwsConnection(AsyncInjectable):
         self.config = self.config_layout.aws
         self.connection = None
 
-
     async def inventory(self):
         await run_in_executor(self._inventory)
     def _setup(self):
+        if not self.config.access_key_id: breakpoint()
+        if not self.config.secret_access_key: breakpoint()
+        self.aws_access_key_id = self.config.access_key_id
+        self.region = self.config.region
         self.connection = boto3.Session(
             aws_access_key_id=self.config.access_key_id,
-            aws_secret_access_key=self.config.secret_access_key
+            aws_secret_access_key=self.config.secret_access_key,
+            region_name=self.region
         )
-        self.region = self.config.region
         self.client = self.connection.client('ec2', region_name=self.region)
         self.keys = []
         for key in self.client.describe_key_pairs()['KeyPairs']:
