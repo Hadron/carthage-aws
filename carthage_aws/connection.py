@@ -96,6 +96,11 @@ resource_factory_methods = dict(
 
 async def run_in_executor(func, *args):
     return await asyncio.get_event_loop().run_in_executor(None, func, *args)
+
+def callback(func, *args):
+    async def wrap(*args):
+        await asyncio.get_event_loop().run_in_executor(None, func, *args)
+    return wrap
     
 @inject_autokwargs(config_layout=ConfigLayout)
 class AwsConnection(AsyncInjectable):
