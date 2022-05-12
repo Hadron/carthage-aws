@@ -379,4 +379,176 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         os.makedirs(p, exist_ok=True)
         return p
 
+class AwsClientManaged(AwsManaged):
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cache = None
+        self.id = False
+        self.arn = False
+
+    client_type = 'ec2'
+
+    @memoproperty
+    def resource_name(self):
+        return "".join([x.title() for x in self.resource_type.split('_')])
+
+    @memoproperty
+    def client(self):
+        return self.connection.connection.client(self.client_type, self.connection.region)
+
+    async def delete(self):
+        def callback():
+            r = getattr(self.client, f'delete_{self.resource_type}').__call__(**{f'{self.resource_name}Ids':[self.id]})
+        await run_in_executor(callback)
+
+    async def find(self):
+        '''Find ourself from a name or id'''
+        if self.id:
+            return await run_in_executor(self.find_from_id)
+        elif self.name:
+            resource_type = '-'.join(self.resource_type.split('_')) if '_' in self.resource_type else self.resource_type
+            # FIXME
+            if resource_type == 'listener':
+                r = self.client.describe_listeners(LoadBalancerArn=self.lb.arn)['Listeners']
+                if len(r) > 1: breakpoint()
+                if len(r) == 1:
+                    self.cache = unpack(r[0])
+                    self.arn = self.cache.ListenerArn
+                    return
+                else:
+                    return
+            # FIXME
+            elif resource_type == 'target-group':
+                r = self.client.describe_target_groups()['TargetGroups']
+                r = [ x for x in r if x['TargetGroupName'] == self.name ]
+                if len(r) > 1: breakpoint()
+                if len(r) == 1:
+                    self.cache = unpack(r[0])
+                    self.arn = self.cache.TargetGroupArn
+                    return
+                else:
+                    return
+            # FIXME
+            elif resource_type == 'load-balancer':
+                r = self.client.describe_load_balancers()['LoadBalancers']
+                r = [ x for x in r if x['LoadBalancerName'] == self.name and x['State']['Code'] in ['active', 'provisioning'] ]
+                if len(r) > 1: breakpoint()
+                if len(r) == 1:
+                    self.cache = unpack(r[0])
+                    self.arn = self.cache.LoadBalancerArn
+                    return
+                else:
+                    return
+            # FIXME
+            elif resource_type == 'resource-share':
+                r = self.client.get_resource_share_associations(associationType='RESOURCE')['resourceShareAssociations']
+                r = [ x for x in r if x['resourceShareName'] == self.name and x['associatedEntity'] in self.share and x['status'] not in ['DISASSOCIATED', 'DELETING', 'DELETED'] ]
+                if len(r) > 1: breakpoint()
+                if len(r) == 1:
+                    self.cache = unpack(r[0])
+                    self.arn = self.cache.resourceShareArn
+                    return
+                else:
+                    return
+            # FIXME
+            names = self.connection.names_by_resource_type[resource_type]
+            if self.name in names:
+                objs = names[self.name]
+                for obj in objs:
+                    # use the first viable
+                    self.id = obj['ResourceId']
+                    await run_in_executor(self.find_from_id)
+                    if self.cache:
+                        return
+            self.id = None
+
+    def find_from_id(self):
+        try:
+            if self.arn:
+                r = getattr(self.client, f'describe_{self.resource_type}s').__call__(**{f'{self.resource_name}Arns':[self.arn]})
+            else:
+                r = getattr(self.client, f'describe_{self.resource_type}s').__call__(**{f'{self.resource_name}Ids':[self.id]})
+        except ClientError as e:
+            logger.warning(f'Failed to load {self}', exc_info=e)
+            self.cache = None
+            if not self.readonly:
+                self.connection.invalid_ec2_resource(self.resource_type, self.id, name=self.name)
+            return
+
+        if len(r[f'{self.resource_name}s']) < 1:
+            return
+            
+        if 'transit_gateway' in self.resource_type:
+            if r[f'{self.resource_name}s'][0]['State'] not in ['deleted', 'deleting']:
+                for t in r[f'{self.resource_name}s'][0]['Tags']:
+                    if t['Key'] == 'Name':
+                        self.name = t['Value']
+            else: return
+            r = r[f'{self.resource_name}s'][0]
+        else:
+            for t in r[f'{self.resource_name}s'][0]['Tags']:
+                if t['Key'] == 'Name':
+                    self.name = t['Value']
+            r = r[f'{self.resource_name}s'][0]
+
+        self.cache = unpack(r)
+        return self.cache
+
+    @setup_task("construct")
+    async def find_or_create(self):
+        if self.cache: return
+        # If we are called directly, rather than through setup_tasks,
+        # then our check_completed will not have run, so we should
+        # explicitly try find, because double creating is bad.
+        await self.find()
+        if self.cache:
+            await self.ainjector(self.post_find_hook)
+            return
+        if not self.name: raise RuntimeError('You must specify a name for creation')
+        if self.readonly:
+            raise LookupError(f'{self.__class__.__name__} with name {self.name} not found and readonly enabled.')
+
+        await self.ainjector(self.pre_create_hook)
+        await run_in_executor(self.do_create)
+        if not (self.cache or self.id or self.arn):
+            raise RuntimeError(f'created object for {self} provided neither cache, id, or arn')
+        if not self.cache:
+            await self.find()
+        else:
+            if self.id == None: self.id = getattr(self.cache, f'{self.resource_name}Id')
+            if self.arn == None: self.arn = getattr(self.cache, f'{self.resource_name}Arn')
+        await self.ainjector(self.post_create_hook)
+        await self.ainjector(self.post_find_hook)
+        return self.cache
+
+    @find_or_create.check_completed()
+    async def find_or_create(self):
+        await self.find()
+        if self.cache:
+            await self.ainjector(self.post_find_hook)
+            return True
+        return False
+
+    @callback
+    def delete(self):
+        if self.arn:
+            r = getattr(self.client, f'delete_{self.resource_type}').__call__(**{f'{self.resource_name}Arn':self.arn})
+        else:
+            r = getattr(self.client, f'delete_{self.resource_type}').__call__(**{f'{self.resource_name}Id':self.id})
+
+    def do_create(self):
+        '''Run in executor context.  Do the actual creation.  Cannot do async things.  Do any necessary async work in pre_create_hook.'''
+        raise NotImplementedError
+
+    async def pre_create_hook(self):
+        '''Any async tasks that need to be performed before do_create is called in executor context.  May have injected dependencies.'''
+        pass
+
+    async def post_create_hook(self):
+        '''Any tasks that should be performed in async context after creation.  May have injected dependencies.'''
+        pass
+
+    async def post_find_hook(self):
+        '''Any tasks performed in async context after an object is found or created.  May have injected dependencies.  If you need to perform tasks before find, simply override :meth:`find`'''
+        pass
