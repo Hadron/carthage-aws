@@ -371,8 +371,6 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         '''Any tasks performed in async context after an object is found or created.  May have injected dependencies.  If you need to perform tasks before find, simply override :meth:`find`'''
         pass
     
-
-
     @memoproperty
     def stamp_path(self):
         p = Path(self.config_layout.state_dir)
