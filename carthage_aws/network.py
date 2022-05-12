@@ -124,8 +124,8 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
         super().__init__( **kwargs)
         self.groups = self.vpc.groups
         self.name = self.network.name
-        
-
+        if hasattr(self.network, 'az'):
+            self.az = self.network.az
 
     async def find(self):
         if self.id: return await run_in_executor(self.find_from_id)
