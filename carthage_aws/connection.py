@@ -329,7 +329,8 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
 
         await self.ainjector(self.pre_create_hook)
         await run_in_executor(self.do_create)
-        assert self.mob or self.id
+        if not (self.mob or self.id):
+            raise RuntimeError(f'created object for {self} provided neither mob nor id')
         if not self.mob:
             await self.find()
         else:
