@@ -223,8 +223,8 @@ Run in executor context.
             
 
 @inject_autokwargs(config_layout=ConfigLayout,
-                   connection=InjectionKey(AwsConnection, _ready=True),
-                                      readonly = InjectionKey("aws_readonly", _optional=True),
+                   connection=InjectionKey(AwsConnection),
+                   readonly=InjectionKey("aws_readonly", _optional=True),
                    id=InjectionKey("aws_id", _optional=True),
                    )
 class AwsManaged(SetupTaskMixin, AsyncInjectable):

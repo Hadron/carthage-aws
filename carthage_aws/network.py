@@ -19,10 +19,9 @@ from botocore.exceptions import ClientError
 __all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet']
 
 
-@inject_autokwargs()
 class AwsVirtualPrivateCloud(AwsManaged):
 
-    stamp_type = "vpc"
+    stamp_type = 'vpc'
     resource_type = 'vpc'
 
     
