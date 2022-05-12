@@ -150,6 +150,8 @@ class AwsConnection(AsyncInjectable):
         # Executor context
         self.names_by_resource_type = {}
         for rt in resource_factory_methods:
+            if '_' in rt:
+                rt='-'.join(rt.split('_'))
             self.names_by_resource_type[rt] = {}
             nbrt = self.names_by_resource_type
         r = self.client.describe_tags(Filters=[dict(Name='key', Values=['Name'])])
@@ -258,7 +260,11 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         tags = []
         if self.name:
             tags.append(dict(Key="Name", Value=self.name))
-        return dict(ResourceType=self.resource_type,
+        if '_' in self.resource_type:
+            rt = '-'.join(self.resource_type.split('_'))
+        else:
+            rt = self.resource_type
+        return dict(ResourceType=rt,
                     Tags=tags)
     
     def find_from_id(self):
@@ -288,12 +294,16 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         if self.id:
             return await run_in_executor(self.find_from_id)
         elif self.name:
-            for id in await self.possible_ids_for_name():
-                # use the first viable
-                self.id = id
-                await run_in_executor(self.find_from_id)
-                if self.mob:
-                    return
+            resource_type = '-'.join(self.resource_type.split('_')) if '_' in self.resource_type else self.resource_type
+            names = self.connection.names_by_resource_type[resource_type]
+            if self.name in names:
+                objs = names[self.name]
+                for obj in objs:
+                    # use the first viable
+                    self.id = obj['ResourceId']
+                    await run_in_executor(self.find_from_id)
+                    if self.mob:
+                        return
             self.id = None
 
     async def possible_ids_for_name(self):
