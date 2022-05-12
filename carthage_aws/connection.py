@@ -133,6 +133,19 @@ class AwsConnection(AsyncInjectable):
         self.run_vpc = None
         self._inventory()
 
+    async def carthage_iter(self, cclass, kw, field, idfield):
+        pass
+
+    async def carthage_vpcs(self):
+        from .network import AwsVirtualPrivateCloud
+        for x in self.client.describe_vpcs()['Vpcs']:
+            yield await self.ainjector(AwsVirtualPrivateCloud, id=x['VpcId'])
+
+    async def carthage_subnets(self):
+        from .network import AwsSubnet
+        for x in self.client.describe_subnets()['Subnets']:
+            yield await self.ainjector(AwsSubnet, id=x['SubnetId'])
+
     def _inventory(self):
         # Executor context
         self.names_by_resource_type = {}
