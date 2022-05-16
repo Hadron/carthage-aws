@@ -11,10 +11,11 @@ from carthage.network import TechnologySpecificNetwork, this_network
 from carthage.config import ConfigLayout
 from carthage.modeling import NetworkModel
 
-from .connection import AwsConnection, AwsManaged, run_in_executor
+from .connection import AwsConnection, AwsManaged, AwsClientManaged, run_in_executor
 
 import boto3
 from botocore.exceptions import ClientError
+from ipaddress import IPv4Network
 
 __all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet']
 
