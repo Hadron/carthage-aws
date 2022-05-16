@@ -88,6 +88,30 @@ class AwsVirtualPrivateCloud(AwsManaged):
         rid = r['RouteTables'][0]['RouteTableId']
         return await self.ainjector(AwsRouteTable, id=rid, subnet=None)
 
+    async def post_create_hook(self):
+
+        def callback():
+
+            rts = list(self.mob.route_tables.all())
+            assert len(rts) == 1
+            rt = rts[0]
+            rt.create_tags(Tags=[dict(Key='Name', Value=f'rt-{self.name}')])
+
+            sgs = list(self.mob.security_groups.all())
+            assert len(sgs) == 1
+            sg = sgs[0]
+            sg.create_tags(Tags=[dict(Key='Name', Value=f'sg-{self.name}')])
+
+            sg.revoke_ingress(IpPermissions=sg.ip_permissions)
+            sg.revoke_egress(IpPermissions=sg.ip_permissions_egress)
+            sg.authorize_ingress(IpPermissions=[{'IpProtocol': '-1', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]}])
+            sg.authorize_egress(IpPermissions=[{'IpProtocol': '-1', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]}])
+
+            sns = list(self.mob.subnets.all())
+            assert len(sns) == 0
+
+        await run_in_executor(callback)
+
         
         
     def delete(self):
