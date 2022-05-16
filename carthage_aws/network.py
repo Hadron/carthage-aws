@@ -67,8 +67,17 @@ class AwsVirtualPrivateCloud(AwsManaged):
                 TagSpecifications=[self.resource_tags])
         self.id = r['Vpc']['VpcId']
 
+    @property
+    def route_tables(self):
+        return [ self.ainjector(AwsRouteTable, id=x.id) for x in self.mob.route_tables.all() ]
 
+    @property
+    def subnets(self):
+        return self._subnets
 
+    def add_subnet(self, subnet):
+        assert subnet.vpc.id == self.id,f"{subnet} does not belong to {self}"
+        self._subnets.append(subnet)
 
     @memoproperty
     def main_route_table_id(self):
