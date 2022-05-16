@@ -18,6 +18,7 @@ from carthage.machine import Machine
 from carthage.network import NetworkConfig, NetworkLink
 from carthage.local import LocalMachineMixin
 from carthage.cloud_init import generate_cloud_init_cloud_config
+import logging
 
 import boto3
 from botocore.exceptions import ClientError
