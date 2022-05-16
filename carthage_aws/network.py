@@ -141,9 +141,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
             except: pass
         self.mob.delete()
 
-
-@inject_autokwargs(connection = InjectionKey(AwsConnection, _ready=True),
-                   network=this_network,
+@inject_autokwargs(network=this_network,
                    vpc=InjectionKey(AwsVirtualPrivateCloud, _ready=True))
 class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
 
