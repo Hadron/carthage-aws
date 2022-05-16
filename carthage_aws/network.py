@@ -27,60 +27,48 @@ class AwsVirtualPrivateCloud(AwsManaged):
 
     
 
-    def __init__(self,  **kwargs):
-        super().__init__( **kwargs)
-        config = self.config_layout
-        if config.aws.vpc_name == None and config.aws.vpc_id == None:
-            raise Error("You must specify either an AWS VPC ID or VPC name.")
-        if config.aws.vpc_name == None:
-            self.name = ''
-        else: self.name = config.aws.vpc_name
-        if config.aws.vpc_id == None:
-            self.id = ''
-        else: self.id = config.aws.vpc_id
-        self.groups = []
-        self.vms = []
+    def __init__(self, cidrblock=None, **kwargs):
 
+        super().__init__( **kwargs)
+
+        c_aws = self.config_layout.aws
+
+        if cidrblock is not None:
+            assert not hasattr(self, 'model')
+            self.cidrblock = cidrblock
+        else:
+            self.cidrblock = getattr(getattr(self, 'model', object()), 'cidrblock', None)
+
+        if self.cidrblock is None:
+            self.cidrblock = str(IPv4Network(c_aws.vpc_cidr))
+
+        if self.name is None:
+            self.name = getattr(getattr(self, 'model', object()), 'name', None)
+
+        if self.name is None:
+            self.name = c_aws.vpc_name 
+
+        if self.id is None:
+            self.id = getattr(getattr(self, 'model', object()), 'id', None)
+
+        if self.id is None:
+            self.id = c_aws.vpc_id
+
+        if not (self.name or self.id):
+            raise ValueError("You must specify either an AWS VPC ID or VPC name.")
+
+        self.groups = []
+        self._subnets = []
 
     def do_create(self):
-        try:
-            r = self.connection.client.create_vpc(
-                    InstanceTenancy='default',
-                                                      CidrBlock=str(self.config_layout.aws.vpc_cidr), 
-                    TagSpecifications=[self.resource_tags])
-            self.id = r['Vpc']['VpcId']
-
-            
-            make_ig = True
-            for ig in self.connection.igs:
-                if ig['vpc'] == self.id:
-                    make_ig = False
-                    break
-            if make_ig:
-                ig = self.connection.client.create_internet_gateway()
-                self.ig = ig['InternetGateway']['InternetGatewayId']
-                self.connection.client.attach_internet_gateway(InternetGatewayId=self.ig, VpcId=self.id)
-                self.connection.client.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=self.ig, RouteTableId=self.main_route_table_id)
-                sg = self.connection.client.create_security_group(GroupName=f'{self.name} open', VpcId=self.id, Description=f'{self.name} open')
-                self.groups.append(sg)
-            
-                self.connection.client.authorize_security_group_ingress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
-                ])
-                self.connection.client.authorize_security_group_egress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
-                ])
-            
+        r = self.connection.client.create_vpc(
+                InstanceTenancy='default',
+                CidrBlock=self.cidrblock, 
+                TagSpecifications=[self.resource_tags])
+        self.id = r['Vpc']['VpcId']
 
 
-        except ClientError as e:
-            logger.error(f'Could not create AWS VPC {self.name} due to {e}.')
+
 
     @memoproperty
     def main_route_table_id(self):
