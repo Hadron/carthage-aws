@@ -208,6 +208,7 @@ class AwsVm(AwsManaged, Machine):
                 ImageId=self.image_id,
                 MinCount=1,
                 MaxCount=1,
+                # BootMode='uefi',
                 InstanceType=self._gfi('aws_instance_type'),
                 UserData=user_data,
                 NetworkInterfaces=network_interfaces,
