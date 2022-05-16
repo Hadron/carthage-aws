@@ -85,11 +85,9 @@ class AwsVirtualPrivateCloud(AwsManaged):
                 dict(Name='vpc-id', Values=[self.id]),
                 dict(Name='association.main',
                      Values=['true'])])
-    async def post_find_hook(self):
-        groups =self.connection.client.describe_security_groups(Filters=[
-            dict(Name='vpc-id', Values=[self.id])])
+        rid = r['RouteTables'][0]['RouteTableId']
+        return await self.ainjector(AwsRouteTable, id=rid, subnet=None)
 
-        self.groups = list(filter(lambda g: g['GroupName'] != "default", groups['SecurityGroups']))
         
         
     def delete(self):
