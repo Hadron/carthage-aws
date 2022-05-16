@@ -79,15 +79,12 @@ class AwsVirtualPrivateCloud(AwsManaged):
         assert subnet.vpc.id == self.id,f"{subnet} does not belong to {self}"
         self._subnets.append(subnet)
 
-    @memoproperty
-    def main_route_table_id(self):
+    async def main_route_table(self):
         r = self.connection.client.describe_route_tables(
             Filters=[
                 dict(Name='vpc-id', Values=[self.id]),
                 dict(Name='association.main',
                      Values=['true'])])
-        return r['RouteTables'][0]['RouteTableId']
-    
     async def post_find_hook(self):
         groups =self.connection.client.describe_security_groups(Filters=[
             dict(Name='vpc-id', Values=[self.id])])
