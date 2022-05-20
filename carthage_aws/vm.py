@@ -131,6 +131,8 @@ class AwsVm(AwsManaged, Machine):
         # operation lock is held by overriding find_or_create
         if getattr(self.model, 'cloud_init',False):
             self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
+            if self.ssh_online_command == Machine.ssh_online_command:
+                self.ssh_online_command = 'systemctl --wait is-system-running'
         else: self.cloud_config = None
         self.image_id = await self.ainjector.get_instance_async('aws_ami')
         self.iam_profile = await self.ainjector.get_instance_async(InjectionKey("aws_iam_profile", _optional=True))
