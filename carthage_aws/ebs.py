@@ -77,3 +77,33 @@ class AwsVolume(AwsManaged, InjectableModel):
         await run_in_executor(callback)
         
 __all__ += ['AwsVolume']
+
+def attach_volume_task(*, device, volume, delete_on_termination=True):
+    '''
+    Typical usage inside a :class:`MachineCustomization`::
+
+        attach_xvdb = attach_volume_task(device="/dev/xvdb", volume=InjectionKey("our_secondary_volume"))
+
+    That will attach a volume providing the ``our_secondary_volume`` dependency as ``/dev/xvdb``.
+
+    '''
+    from .vm import AwsVm
+    assert isinstance(volume,InjectionKey), "Currently only InjectionKeys for volumes are supported"
+    @setup_task(f"Attach {device}")
+    @inject(vm=InjectionKey(AwsVm, _ready=False), volume=InjectionKey(volume, _ready=False))
+    async def attach_volume(self, vm, volume):
+        if not vm.mob: await vm.find_or_create()
+        volume.injector.add_provider(InjectionKey('aws_availability_zone'), vm.mob.subnet.availability_zone)
+        await volume.async_become_ready()
+        return await volume.attach(instance=vm, device=device, delete_on_termination=delete_on_termination)
+    @attach_volume.check_completed()
+    @inject(vm=InjectionKey(AwsVm, _ready=False))
+    async def attach_volume(self, vm):
+        if not vm.mob: await vm.find()
+        if not vm.mob: return False
+        return any(filter(
+            lambda mapping: mapping['DeviceName'] == device, vm.mob.block_device_mappings))
+
+    return attach_volume
+
+__all__ += ['attach_volume_task']
