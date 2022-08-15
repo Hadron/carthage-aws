@@ -30,8 +30,6 @@ class AwsVirtualPrivateCloud(AwsManaged):
     def __init__(self,  **kwargs):
         super().__init__( **kwargs)
         config = self.config_layout
-        if config.aws.vpc_name == None and config.aws.vpc_id == None:
-            raise Error("You must specify either an AWS VPC ID or VPC name.")
         if config.aws.vpc_name == None:
             self.name = ''
         else: self.name = config.aws.vpc_name
@@ -41,6 +39,18 @@ class AwsVirtualPrivateCloud(AwsManaged):
         self.groups = []
         self.vms = []
 
+
+    async def find(self):
+        def find_default():
+            r = self.connection.client.describe_vpcs()['Vpcs']
+            for v in r:
+                if v['IsDefault']:
+                    self.id = v['VpcId']
+                    return self.find_from_id()
+        if not self.name and not self.id:
+            await run_in_executor(find_default)
+            if self.mob: return
+        return await super().find()
 
     def do_create(self):
         try:
