@@ -144,6 +144,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
     pass_name_to_super = False # True for machines
     name = None
     id = None
+
     def __init__(self, *, name=None, **kwargs):
         if name and self.pass_name_to_super: kwargs['name'] = name
         if name: self.name = name
@@ -217,7 +218,8 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             objs = names[self.name]
             return [obj['ResourceId'] for obj in objs]
         return []
-    @setup_task("construct")
+
+    @setup_task("construct", order=700)
     async def find_or_create(self):
         if self.mob: return
         # If we are called directly, rather than through setup_tasks,
