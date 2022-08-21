@@ -15,8 +15,9 @@ from .connection import AwsConnection, AwsManaged, run_in_executor
 
 import boto3
 from botocore.exceptions import ClientError
+import dataclasses
 
-__all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet']
+__all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet', 'AwsSecurityGroup']
 
 
 @inject_autokwargs()
@@ -122,6 +123,112 @@ class AwsVirtualPrivateCloud(AwsManaged):
             except: pass
         self.mob.delete()
 
+@dataclasses.dataclass
+class AwsIpRange:
+    CidrIp: str = dataclasses.field(default='0.0.0.0/0')
+    Description: str = dataclasses.field(default='ALL_IPV4')
+
+    def __repr__(self):
+        return f'{dict(CidrIp=self.CidrIp, Description=self.Description)}'
+
+@dataclasses.dataclass
+class AwsIpPermission:
+    IpRanges: list[AwsIpRange] = dataclasses.field(default_factory=AwsIpRange)
+    IpProtocol: str = dataclasses.field(default=-1)
+    FromPort: int = dataclasses.field(default=-1)
+    ToPort: int = dataclasses.field(default=-1)
+
+    def __repr__(self):
+        return f'{dict(IpRanges=self.IpRanges, IpProtocol=self.IpProtocol, ToPort=self.ToPort, FromPort=self.FromPort)}'
+
+@inject_autokwargs(vpc=AwsVirtualPrivateCloud)
+class AwsSecurityGroup(AwsManaged):
+    '''A class to represent a security group and its rulesets in an AWS VPC.
+
+    :param description: A description for the security group, if unspecified `name` is used.
+    :type description: str
+
+    :param ingress_rules: A list of tuples to represent the ingress rules (see FORMAT).
+        If unspecified anywhere all is allowed.
+
+    :type ingress_rules: list
+
+    :param egress_rules: A list of tuples to represent the egress rules (see FORMAT).
+        If unspecified anywhere all is allowed.
+
+    :type egress_rules: list
+
+    * FORMAT: The format for passing rules is [ ( ( <'cidr'<, 'description' >>), <'protocol'<, to_port<, from_port>>>), .. ]
+        Note: <,> used to denote optional parameters so not to be confused with the python [] list syntax
+
+    * If you wanted to allow ALL TCP traffic to port 22, you should provide a rule as follows:
+        ingress_rules = [ ((), 'tcp', '22') ]
+
+    * If you wanted to allow TCP from a SPECIFIED BLOCK to port 25 from port 25 you should provide a rule as follows:
+        ingress_rules = [ (('192.168.1.0/24',), 'tcp', 25, 25) ]
+
+    * If you wanted to allow TCP from a SPECIFIED BLOCK to ANY port from port 25 you should provide a rule as follows:
+        ingress_rules = [ (('192.168.1.0/24',), 'tcp', -1, 25) ]
+
+    * To optionally provide a rule description, provide text as the second argument of the `cidr` tuple:
+        ingress_rules = [ (('192.168.1.0/24', 'the mail rule'), 'tcp', 25, 25) ]
+
+    '''
+
+    stamp_type = "security-group"
+    resource_type = "security-group"
+
+    def __init__(self,  **kwargs):
+        if 'description' in kwargs:
+            self.description = kwargs.pop('description')
+        else:
+            self.description = self.name
+
+        if 'ingress_rules' in kwargs:
+            self.ingress_rules = [ AwsIpPermission(AwsIpRange(*x[0]), *x[1:]) for x in kwargs.pop('ingress_rules') ]
+        else:
+            self.ingress_rules = AwsIpPermission()
+
+        if 'egress_rules' in kwargs:
+            self.egress_rules = [ AwsIpPermission(AwsIpRange(*x[0]), *x[1:]) for x in kwargs.pop('egress_rules') ]
+        else:
+            self.egress_rules = AwsIpPermission()
+
+        super().__init__(**kwargs)
+
+    def do_create(self):
+        self.mob = self.client.create_security_group(
+            Description=self.description,
+            GroupName=self.name,
+            VpcId=self.vpc,
+            TagSpecifications=[self.resource_tags]
+        )
+
+    async def delete(self):
+        await run_in_executor(self.mob.delete)
+
+    async def post_create_hook(self):
+        breakpoint()
+        r = self.mob.authorize_egress(
+            IpPermissions=[ x for x in self.egress_rules ],
+            TagSpecifications=[self.resource_tags]
+        )
+        if r['Return'] == False:
+            raise ValueError("Error in egress rules")
+
+        r = self.mob.authorize_ingress(
+            GroupName=self.name,
+            IpPermissions=[ x for x in self.ingress_rules ],
+            TagSpecifications=[self.resource_tags]
+        )
+        if r['Return'] == False:
+            raise ValueError("Error in ingress rules")
+
+    async def post_find_hook(self):
+        # we should check to make sure rules match ?
+        # perhaps we should hash the dict from the mob such that we could determine easily if the ruleset differs
+        # if we did .. we could add the hash to a stamp and  ....
+        pass
 
 @inject_autokwargs(connection = InjectionKey(AwsConnection, _ready=True),
                    network=this_network,

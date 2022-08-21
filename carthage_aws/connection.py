@@ -27,6 +27,8 @@ resource_factory_methods = dict(
     subnet='Subnet',
     volume='Volume',
     image='Image',
+    security_group='SecurityGroup',
+    security_group_rule='SecurityGroupRule',
 )
 
 async def run_in_executor(func, *args):
