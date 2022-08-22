@@ -12,7 +12,7 @@ from carthage import *
 from carthage.dependency_injection import *
 from carthage.network import TechnologySpecificNetwork, this_network
 from carthage.config import ConfigLayout
-from carthage.modeling import NetworkModel
+from carthage.modeling import NetworkModel, InjectableModel, provides
 
 from .connection import AwsConnection, AwsManaged, run_in_executor
 
@@ -40,7 +40,6 @@ class AwsVirtualPrivateCloud(AwsManaged):
         if config.aws.vpc_id == None:
             self.id = ''
         else: self.id = config.aws.vpc_id
-        self.groups = []
         self.vms = []
 
 
@@ -75,21 +74,6 @@ class AwsVirtualPrivateCloud(AwsManaged):
                 self.ig = ig['InternetGateway']['InternetGatewayId']
                 self.connection.client.attach_internet_gateway(InternetGatewayId=self.ig, VpcId=self.id)
                 self.connection.client.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=self.ig, RouteTableId=self.main_route_table_id)
-                sg = self.connection.client.create_security_group(GroupName=f'{self.name} open', VpcId=self.id, Description=f'{self.name} open')
-                self.groups.append(sg)
-
-                self.connection.client.authorize_security_group_ingress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
-                ])
-                self.connection.client.authorize_security_group_egress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
-                    {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
-                ])
 
 
 
@@ -106,11 +90,15 @@ class AwsVirtualPrivateCloud(AwsManaged):
         return r['RouteTables'][0]['RouteTableId']
 
     async def post_find_hook(self):
+        await run_in_executor(lambda: self.groups)
+
+    @memoproperty
+    def groups(self):
         groups =self.connection.client.describe_security_groups(Filters=[
             dict(Name='vpc-id', Values=[self.id])])
 
-        self.groups = list(filter(lambda g: g['GroupName'] != "default", groups['SecurityGroups']))
-
+        self.groups = list( groups['SecurityGroups'])
+        return self.groups
 
     def delete(self):
         for sn in self.mob.subnets.all():
@@ -131,7 +119,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
 class SgRule:
 
     cidr: frozenset[ipaddress.IPv4Network]
-    port: typing.Union[int, tuple[int,int]]
+    port: typing.Union[int, tuple[int,int]] = (-1, -1)
     proto: typing.Union[str,int] = 'tcp'
     description: str = ""
     @staticmethod
@@ -172,7 +160,7 @@ class SgRule:
         description = ""
         for k in ('FromPort', 'ToPort'):
             if k not in permission: permission[k] = -1
-        if permission['IpRanges'][0].get('Description'):
+        if permission['IpRanges'] and permission['IpRanges'][0].get('Description'):
             description = permission['IpRanges'][0]['Description']
         return cls(
             cidr=map(lambda i: i['CidrIp'], permission['IpRanges']),
@@ -182,7 +170,7 @@ class SgRule:
 
 
 @inject_autokwargs(vpc=AwsVirtualPrivateCloud)
-class AwsSecurityGroup(AwsManaged):
+class AwsSecurityGroup(AwsManaged, InjectableModel):
     '''A class to represent a security group and its rulesets in an AWS VPC.
 
     :param description: A description for the security group, if unspecified `name` is used.
@@ -201,6 +189,9 @@ class AwsSecurityGroup(AwsManaged):
 
     '''
 
+    #: If true, create tags when the resource is created
+    include_tags = True
+    
     stamp_type = "security-group"
     resource_type = "security_group"
 
@@ -221,6 +212,18 @@ class AwsSecurityGroup(AwsManaged):
     ingress_rules: list[SgRule] = []
     egress_rules: list[SgRule] = [SgRule(cidr='0.0.0.0/0', proto='-1', port=-1)]
 
+    @classmethod
+    def our_key(cls):
+        return InjectionKey(AwsSecurityGroup, name=cls.name)
+
+    def __init_subclass__(cls, **kwargs):
+        # Modeling only handles our_key for containers, but
+        # AwsSecurityGroup doesn't need to be a container.
+        try:
+            provides(cls.our_key())(cls)
+        except AttributeError: pass
+        super().__init_subclass__(**kwargs)
+        
 
     def do_create(self):
         self.mob = self.service_resource.create_security_group(
@@ -230,8 +233,15 @@ class AwsSecurityGroup(AwsManaged):
             TagSpecifications=[self.resource_tags]
         )
 
+        # refresh groups at vpc level
+        try: del self.vpc.groups
+        except Exception: pass
+
     async def delete(self):
+        assert not self.readonly
         await run_in_executor(self.mob.delete)
+        try: del self.vpc.groups
+        except Exception: pass
 
 
     @memoproperty
@@ -279,7 +289,21 @@ class AwsSecurityGroup(AwsManaged):
             except Exception: pass
             try: del self.existing_egress
             except Exception: pass
-            
+
+    async def possible_ids_for_name(self):
+        def callback():
+            results = []
+            for g in self.vpc.groups:
+                if g['GroupName'] == self.name: results.append(g['GroupId'])
+            return results
+        return await run_in_executor(callback)
+
+    @property
+    def resource_tags(self):
+        if self.include_tags and self.name:
+            return super().resource_tags
+        return []
+    
             
 
 @inject_autokwargs(connection = InjectionKey(AwsConnection, _ready=True),

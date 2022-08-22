@@ -28,7 +28,14 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
     domain = "autotest.photon.ac"
     class our_net(NetworkModel):
         v4_config = V4Config(network="192.168.100.0/24")
+        aws_security_groups = ['all_open']
+        
 
+    class all_open(AwsSecurityGroup):
+        ingress_rules = [SgRule(
+            cidr='0.0.0.0/0', proto=-1)]
+
+        name = 'all_open'
     class net_config(NetworkConfigModel):
         add('eth0', mac=None,
             net=InjectionKey("our_net"))
@@ -97,6 +104,12 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
 
 
     class all_access(AwsSecurityGroup):
+                         # This is the same as all_open used above,
+                         # but two different groups are used to
+                         # isolate the one to which vms are connected
+                         # to from the one to which tests for sg
+                         # creation and deletion are made.
+                         
         name = 'all_access'
 
         ingress_rules = [SgRule(

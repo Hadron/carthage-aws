@@ -23,7 +23,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from .connection import AwsConnection, AwsManaged, run_in_executor
-from .network import AwsVirtualPrivateCloud, AwsSubnet
+from .network import AwsVirtualPrivateCloud, AwsSubnet, AwsSecurityGroup
 
 __all__ = ['AwsVm']
 
@@ -62,7 +62,29 @@ async def generate_block_device_mappings(connection, ami, model, volume_type):
                 DeleteOnTermination=True,
                 VolumeType=volume_type)))
     return mappings
-    
+
+
+@inject(ainjector=AsyncInjector)
+async def find_security_groups(l:NetworkLink, vpc_groups, *, ainjector):
+    desired_groups = getattr(l, 'aws_security_groups', None)
+    if desired_groups is None:
+        desired_groups = getattr(l.net, 'aws_security_groups', None)
+        if desired_groups is None:
+            desired_groups = l.net.injector.get_instance(InjectionKey('aws_security_groups', _optional=True))
+    if desired_groups is None:
+        desired_groups = ['default']
+    groups = {g['GroupName']:g['GroupId'] for g in l.net_instance.vpc.groups}
+    results = []
+    for g in desired_groups:
+        g_obj = await ainjector.get_instance_async(InjectionKey(AwsSecurityGroup, name=g, _optional=True))
+        if g_obj: results.append(g_obj.id)
+        elif g in groups:
+            results.append(groups[g])
+        else:
+            logger.error(f'{g} is an unknown security group for {l}')
+    return results
+
+        
 
 @inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True),
                    )
@@ -141,7 +163,11 @@ class AwsVm(AwsManaged, Machine):
         if hasattr(self.model, 'disk_sizes'):
             self.block_device_mappings = await self.ainjector(generate_block_device_mappings)
         else: self.block_device_mappings = None
-        
+        for l in self.network_links.values():
+            if l.local_type: continue
+            l.security_group_ids = await self.ainjector(
+                find_security_groups, l, l.net_instance.vpc.groups)
+            
 
     @setup_task("Create VM", order=AwsManaged.find_or_create.order)
     async def find_or_create(self, already_locked=False):
@@ -157,6 +183,7 @@ class AwsVm(AwsManaged, Machine):
         network_interfaces = []
         device_index = 0
         for l in self.network_links.values():
+            if l.local_type: continue
             d = {
                 'DeviceIndex': device_index,
                 'Description': l.interface,
@@ -167,8 +194,8 @@ class AwsVm(AwsManaged, Machine):
                 d['PrivateIpAddress'] = l.merged_v4_config.address.compressed
             if len(self.network_links) == 1:
                 d['AssociatePublicIpAddress'] = True
-            if l.net_instance.vpc.groups:
-                d['Groups'] = [ l.net_instance.vpc.groups[0]['GroupId'] ]
+            if hasattr(l, 'security_group_ids'):
+                d['Groups'] = l.security_group_ids
             network_interfaces.append(d)
             device_index += 1
 
