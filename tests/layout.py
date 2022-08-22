@@ -95,3 +95,19 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
 
             install_mako = install_mako_task('model')
 
+
+    class all_access(AwsSecurityGroup):
+        name = 'all_access'
+
+        ingress_rules = [SgRule(
+            description='Allow Everything',
+            cidr='0.0.0.0/0',
+            port=-1,
+            proto=-1)]
+        
+
+    class no_access(AwsSecurityGroup):
+        name = 'no_access'
+        ingress_rules = []
+        egress_rules = []
+        

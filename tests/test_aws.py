@@ -90,3 +90,18 @@ async def test_image_building(carthage_layout, request):
         
     finally:
         await instance.machine.delete()
+
+@async_test
+async def test_security_groups(carthage_layout):
+    layout = carthage_layout
+    con = await layout.ainjector.get_instance_async(AwsConnection)
+    await layout.all_access.async_become_ready()
+    try:
+        assert set(layout.all_access.ingress_rules) == layout.all_access.existing_ingress
+    finally:
+        await layout.all_access.delete()
+    await layout.no_access.async_become_ready()
+    try:
+        assert layout.no_access.existing_egress == set()
+    finally:
+        await layout.no_access.delete()

@@ -28,7 +28,6 @@ resource_factory_methods = dict(
     volume='Volume',
     image='Image',
     security_group='SecurityGroup',
-    security_group_rule='SecurityGroupRule',
 )
 
 async def run_in_executor(func, *args):
@@ -74,6 +73,7 @@ class AwsConnection(AsyncInjectable):
             # in case someone has tagged a resource we do not normally
             # manage with a Name.
             rt, rv = resource['ResourceType'], resource['Value']
+            rt = rt.replace('-','_')
             nbrt.setdefault(rt, {})
             nbrt[rt].setdefault(rv, [])
             nbrt[rt][rv].append(resource)
@@ -175,7 +175,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         tags = []
         if self.name:
             tags.append(dict(Key="Name", Value=self.name))
-        return dict(ResourceType=self.resource_type,
+        return dict(ResourceType=self.resource_type.replace('_','-'),
                     Tags=tags)
     
     def find_from_id(self):

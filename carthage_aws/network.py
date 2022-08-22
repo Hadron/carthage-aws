@@ -5,6 +5,9 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
+import dataclasses
+import ipaddress
+import typing
 from carthage import *
 from carthage.dependency_injection import *
 from carthage.network import TechnologySpecificNetwork, this_network
@@ -15,9 +18,9 @@ from .connection import AwsConnection, AwsManaged, run_in_executor
 
 import boto3
 from botocore.exceptions import ClientError
-import dataclasses
 
-__all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet', 'AwsSecurityGroup']
+__all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet', 'AwsSecurityGroup',
+           'SgRule']
 
 
 @inject_autokwargs()
@@ -26,7 +29,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
     stamp_type = "vpc"
     resource_type = 'vpc'
 
-    
+
 
     def __init__(self,  **kwargs):
         super().__init__( **kwargs)
@@ -57,11 +60,11 @@ class AwsVirtualPrivateCloud(AwsManaged):
         try:
             r = self.connection.client.create_vpc(
                     InstanceTenancy='default',
-                                                      CidrBlock=str(self.config_layout.aws.vpc_cidr), 
+                                                      CidrBlock=str(self.config_layout.aws.vpc_cidr),
                     TagSpecifications=[self.resource_tags])
             self.id = r['Vpc']['VpcId']
 
-            
+
             make_ig = True
             for ig in self.connection.igs:
                 if ig['vpc'] == self.id:
@@ -74,7 +77,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
                 self.connection.client.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=self.ig, RouteTableId=self.main_route_table_id)
                 sg = self.connection.client.create_security_group(GroupName=f'{self.name} open', VpcId=self.id, Description=f'{self.name} open')
                 self.groups.append(sg)
-            
+
                 self.connection.client.authorize_security_group_ingress(GroupId=self.groups[0]['GroupId'], IpPermissions=[
                     {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'tcp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
                     {'FromPort': 1, 'ToPort': 65535, 'IpProtocol': 'udp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
@@ -87,7 +90,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
                     {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmp', 'IpRanges':[{'CidrIp': '0.0.0.0/0'}]},
                     {'FromPort': 8, 'ToPort': -1, 'IpProtocol': 'icmpv6', 'Ipv6Ranges':[{'CidrIpv6': '::/0'}]}
                 ])
-            
+
 
 
         except ClientError as e:
@@ -101,14 +104,14 @@ class AwsVirtualPrivateCloud(AwsManaged):
                 dict(Name='association.main',
                      Values=['true'])])
         return r['RouteTables'][0]['RouteTableId']
-    
+
     async def post_find_hook(self):
         groups =self.connection.client.describe_security_groups(Filters=[
             dict(Name='vpc-id', Values=[self.id])])
 
         self.groups = list(filter(lambda g: g['GroupName'] != "default", groups['SecurityGroups']))
-        
-        
+
+
     def delete(self):
         for sn in self.mob.subnets.all():
             sn.delete()
@@ -123,23 +126,60 @@ class AwsVirtualPrivateCloud(AwsManaged):
             except: pass
         self.mob.delete()
 
-@dataclasses.dataclass
-class AwsIpRange:
-    CidrIp: str = dataclasses.field(default='0.0.0.0/0')
-    Description: str = dataclasses.field(default='ALL_IPV4')
 
-    def __repr__(self):
-        return f'{dict(CidrIp=self.CidrIp, Description=self.Description)}'
+@dataclasses.dataclass(frozen=True)
+class SgRule:
 
-@dataclasses.dataclass
-class AwsIpPermission:
-    IpRanges: list[AwsIpRange] = dataclasses.field(default_factory=AwsIpRange)
-    IpProtocol: str = dataclasses.field(default=-1)
-    FromPort: int = dataclasses.field(default=-1)
-    ToPort: int = dataclasses.field(default=-1)
+    cidr: frozenset[ipaddress.IPv4Network]
+    port: typing.Union[int, tuple[int,int]]
+    proto: typing.Union[str,int] = 'tcp'
+    description: str = ""
+    @staticmethod
+    def _handle_cidr(cidr_in):
+        if isinstance(cidr_in, (ipaddress.IPv4Network, str)):
+            cidr_in = [cidr_in]
+        cidr_out = frozenset(map(lambda cidr: ipaddress.IPv4Network(cidr), cidr_in))
+        return cidr_out
 
-    def __repr__(self):
-        return f'{dict(IpRanges=self.IpRanges, IpProtocol=self.IpProtocol, ToPort=self.ToPort, FromPort=self.FromPort)}'
+    @staticmethod
+    def _handle_port(port):
+        if isinstance(port, int):
+            port = (port, port)
+        return (int(port[0]), int(port[1]))
+
+    def __post_init__(self):
+        self.__dict__['cidr'] = self._handle_cidr(self.cidr)
+        self.__dict__['port'] = self._handle_port(self.port)
+        self.__dict__['proto'] = str(self.proto)
+
+    def to_ip_permission(self):
+        ip_ranges = []
+        for i, ip in enumerate(self.cidr):
+            ip_ranges.append(dict(CidrIp=str(ip)))
+            if i == 0 and self.description:
+                ip_ranges[0]['Description'] = self.description
+        return dict(
+            IpProtocol=str(self.proto),
+            FromPort=self.port[0],
+            ToPort=self.port[1],
+            IpRanges=ip_ranges)
+
+    @classmethod
+    def from_ip_permission(cls, permission):
+        for k in ('IpProtocol', 'IpRanges'):
+            if k not in permission:
+                raise ValueError(f'IpPermission requires {k}')
+        description = ""
+        for k in ('FromPort', 'ToPort'):
+            if k not in permission: permission[k] = -1
+        if permission['IpRanges'][0].get('Description'):
+            description = permission['IpRanges'][0]['Description']
+        return cls(
+            cidr=map(lambda i: i['CidrIp'], permission['IpRanges']),
+            proto=permission['IpProtocol'],
+            port=(permission['FromPort'], permission['ToPort']),
+            description=description)
+
 
 @inject_autokwargs(vpc=AwsVirtualPrivateCloud)
 class AwsSecurityGroup(AwsManaged):
@@ -148,35 +188,21 @@ class AwsSecurityGroup(AwsManaged):
     :param description: A description for the security group, if unspecified `name` is used.
     :type description: str
 
-    :param ingress_rules: A list of tuples to represent the ingress rules (see FORMAT).
+    :param ingress_rules: A list of ingress rules
+        If unspecified no ingress rules are allowed.
+
+    :type ingress_rules: list[SgRule]
+
+    :param egress_rules: A list of egress rules.
         If unspecified anywhere all is allowed.
 
-    :type ingress_rules: list
+    :type egress_rules: list[SgRule]
 
-    :param egress_rules: A list of tuples to represent the egress rules (see FORMAT).
-        If unspecified anywhere all is allowed.
-
-    :type egress_rules: list
-
-    * FORMAT: The format for passing rules is [ ( ( <'cidr'<, 'description' >>), <'protocol'<, to_port<, from_port>>>), .. ]
-        Note: <,> used to denote optional parameters so not to be confused with the python [] list syntax
-
-    * If you wanted to allow ALL TCP traffic to port 22, you should provide a rule as follows:
-        ingress_rules = [ ((), 'tcp', '22') ]
-
-    * If you wanted to allow TCP from a SPECIFIED BLOCK to port 25 from port 25 you should provide a rule as follows:
-        ingress_rules = [ (('192.168.1.0/24',), 'tcp', 25, 25) ]
-
-    * If you wanted to allow TCP from a SPECIFIED BLOCK to ANY port from port 25 you should provide a rule as follows:
-        ingress_rules = [ (('192.168.1.0/24',), 'tcp', -1, 25) ]
-
-    * To optionally provide a rule description, provide text as the second argument of the `cidr` tuple:
-        ingress_rules = [ (('192.168.1.0/24', 'the mail rule'), 'tcp', 25, 25) ]
 
     '''
 
     stamp_type = "security-group"
-    resource_type = "security-group"
+    resource_type = "security_group"
 
     def __init__(self,  **kwargs):
         if 'description' in kwargs:
@@ -185,50 +211,76 @@ class AwsSecurityGroup(AwsManaged):
             self.description = self.name
 
         if 'ingress_rules' in kwargs:
-            self.ingress_rules = [ AwsIpPermission(AwsIpRange(*x[0]), *x[1:]) for x in kwargs.pop('ingress_rules') ]
-        else:
-            self.ingress_rules = AwsIpPermission()
+            self.ingress_rules = kwargs.pop('ingress_rules')
 
         if 'egress_rules' in kwargs:
-            self.egress_rules = [ AwsIpPermission(AwsIpRange(*x[0]), *x[1:]) for x in kwargs.pop('egress_rules') ]
-        else:
-            self.egress_rules = AwsIpPermission()
+            self.egress_rules = kwargs.pop('egress_rules')
 
         super().__init__(**kwargs)
 
+    ingress_rules: list[SgRule] = []
+    egress_rules: list[SgRule] = [SgRule(cidr='0.0.0.0/0', proto='-1', port=-1)]
+
+
     def do_create(self):
-        self.mob = self.client.create_security_group(
+        self.mob = self.service_resource.create_security_group(
             Description=self.description,
             GroupName=self.name,
-            VpcId=self.vpc,
+            VpcId=self.vpc.id,
             TagSpecifications=[self.resource_tags]
         )
 
     async def delete(self):
         await run_in_executor(self.mob.delete)
 
-    async def post_create_hook(self):
-        breakpoint()
-        r = self.mob.authorize_egress(
-            IpPermissions=[ x for x in self.egress_rules ],
-            TagSpecifications=[self.resource_tags]
-        )
-        if r['Return'] == False:
-            raise ValueError("Error in egress rules")
 
-        r = self.mob.authorize_ingress(
-            GroupName=self.name,
-            IpPermissions=[ x for x in self.ingress_rules ],
-            TagSpecifications=[self.resource_tags]
-        )
-        if r['Return'] == False:
-            raise ValueError("Error in ingress rules")
+    @memoproperty
+    def existing_egress(self):
+        return         set(map(
+            lambda permission: SgRule.from_ip_permission(permission),
+            self.mob.ip_permissions_egress))
+
+    @memoproperty
+    def existing_ingress(self):
+        return set(map(
+            lambda permission:SgRule.from_ip_permission(permission),
+            self.mob.ip_permissions))
 
     async def post_find_hook(self):
-        # we should check to make sure rules match ?
-        # perhaps we should hash the dict from the mob such that we could determine easily if the ruleset differs
-        # if we did .. we could add the hash to a stamp and  ....
-        pass
+        def callback():
+            existing_egress = self.existing_egress
+            existing_ingress = self.existing_ingress
+            expected_ingress = set(self.ingress_rules)
+            expected_egress = set(self.egress_rules)
+
+            if expected_egress-existing_egress:
+                self.mob.authorize_egress(
+                IpPermissions=[ x.to_ip_permission() for x in expected_egress-existing_egress],
+                    )
+
+            if expected_ingress-existing_ingress:
+                self.mob.authorize_ingress(
+                IpPermissions=[ x.to_ip_permission() for x in expected_ingress-existing_ingress ],
+                )
+
+            if existing_egress-expected_egress:
+                self.mob.revoke_egress(
+                    IpPermissions=[x.to_ip_permission() for x in existing_egress-expected_egress],
+                    )
+
+            if existing_ingress-expected_ingress:
+                self.mob.revoke_ingress(
+                                IpPermissions=[x.to_ip_permission() for x in existing_ingress-expected_ingress],
+                            )
+
+        if not self.readonly:
+            await run_in_executor(callback)
+            try: del self.existing_ingress
+            except Exception: pass
+            try: del self.existing_egress
+            except Exception: pass
+            
+            
 
 @inject_autokwargs(connection = InjectionKey(AwsConnection, _ready=True),
                    network=this_network,
@@ -237,12 +289,12 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
 
     stamp_type = "subnet"
     resource_type = 'subnet'
-    
+
     def __init__(self,  **kwargs):
         super().__init__( **kwargs)
         self.groups = self.vpc.groups
         self.name = self.network.name
-        
+
 
 
     async def find(self):
@@ -261,7 +313,6 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
                                                      )
             self.id = r['Subnet']['SubnetId']
             # No need to associate subnet with main route table
-            
+
         except ClientError as e:
             logger.error(f'Could not create AWS subnet {self.name} due to {e}.')
-
