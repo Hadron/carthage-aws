@@ -16,7 +16,7 @@ jobs:
       - name: install dependencies
         run: |
           podman pull ghcr.io/hadron/carthage:latest
-          podman run -v`pwd`:/carthage_aws -d --name carthage --privileged --device=/dev/fuse run carthage:latest
+          podman run -v`pwd`:/carthage_aws -d --name carthage --privileged --device=/dev/fuse carthage:latest
           podman exec carthage apt update
           podman exec carthage apt -y install python3-pytest python3-boto3
 
