@@ -15,11 +15,11 @@ jobs:
       - uses: actions/checkout@v2
       - name: install dependencies
         run: |
-          sudo apt -q update
-          sudo apt -y install systemd-container socat qemu-utils fai-setup-storage fai-server python3-mako python3-sh python3-pyvmomi python3-yaml python3-pytest ansible genisoimage python3-boto3 sshfs
+          podman pull ghcr..io/hadron/carthage:latest
+          podman run -v`pwd`:/carthage_aws -d --name carthage --privileged --device=/dev/fuse run carthage:latest
+          podman exec carthage apt update
+          podman exec carthage apt -y install python3-pytest python3-boto3
 
       - name: run tests
         run: |
-          git clone https://github.com/hadron/carthage
-                     PYTHONPATH=.:carthage pytest-3 -v --carthage-config=.github/test_config.yml --log-cli-level=debug tests
-          
+          podman exec -ti -w/carthage_aws carthage pytest-3 -v --carthage-config=.github/test_config.yml
