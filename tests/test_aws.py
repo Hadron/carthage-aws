@@ -78,15 +78,17 @@ async def test_image_building(carthage_layout, request):
     try:
         instance =  layout.image_builder
         await instance.async_become_ready()
-        await instance.machine.async_become_ready()
+        with TestTiming(1200):
+            await instance.machine.async_become_ready()
         #instance.machine.ssh('-A', _fg=True)
         #breakpoint()
-        await subtest_controller(
-            request, instance.machine,
-            ["--carthage-config=/carthage_aws/config.yml",
-             "/carthage_aws/tests/inner_image_builder.py"],
-            python_path="/carthage:/carthage_aws",
-            ssh_agent=True)
+        with TestTiming(1500):
+            await subtest_controller(
+                request, instance.machine,
+                ["--carthage-config=/carthage_aws/config.yml",
+                 "/carthage_aws/tests/inner_image_builder.py"],
+                python_path="/carthage:/carthage_aws",
+                ssh_agent=True)
         
     finally:
         await instance.machine.delete()

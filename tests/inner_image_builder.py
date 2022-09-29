@@ -19,7 +19,8 @@ async def test_actually_build_image(carthage_layout):
     layout = carthage_layout
     instance = layout.image_builder.machine
     await instance.is_machine_running()
-    await layout.ainjector(build_ami,
-                           name="test-ami",
-                           add_time_to_name=True)
+    with TestTiming(1300):
+        await layout.ainjector(build_ami,
+                               name="test-ami",
+                               add_time_to_name=True)
     
