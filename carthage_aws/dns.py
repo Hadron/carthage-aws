@@ -117,47 +117,47 @@ class AwsHostedZone(AwsManaged):
         def callback():
             assert type(parent) is AwsHostedZone
             assert self.name.partition('.')[2] == parent.name
-            parent.update_record((self.name, self.nameservers, 'NS'))
+            parent.update_record((self.name, 'NS', self.nameservers))
         return await run_in_executor(callback)
 
     # could decorate for other actions
-    async def update_record(self, *args):
+    async def update_record(self, *args, ttl=300):
         '''
         Updates aws route53 record(s)
         Arguments::
-            *args : must be tuples representing records
-            record (tuple) : (Name, Value, Type) must be specified
+            *args : must be sequences representing records
+            record (sequence) : (Name, type, mValue) must be specified
                 Value may be list or str
 
         Typical usage::
             zone.update_records(
                 [
-                    ('foo.zone.org', '1.2.3.4', 'A'),
-                    ('bar.zone.org', ['ns1.zone.org', 'ns2.zone.org'] 'NS')
+                    ('foo.zone.org', 'A', '1.2.3.4''),
+                    ('bar.zone.org', 'NS', ['ns1.zone.org', 'ns2.zone.org'])
                 ]
             )
         '''
         changes = []
         for a in args:
-            assert type(a) is tuple,ValueError(f"{a} must be a tuple")
-            assert a[2] in self.allrrtype,ValueError(f"{a[2]} must be a valid rrtype {self.allrrtype}")
+            assert isinstance(a, collections.abc.Sequence),ValueError(f"{a} must be a sequence")
+            name, rrtype, values = a
+            if isinstance(values, str) and values in self.allrrtype:
+                warnings.warn('update_records now takes name, type, value not name, value, type')
+                values, rrtype = rrtype, values
+            if not isinstance(values, collections.abc.sequence): values = (values,)
+            assert rrtype in self.allrrtype,ValueError(f"{rrtype} must be a valid rrtype {self.allrrtype}")
             records = []
-            if type(a[1]) is list:
-                for r in a[1]:
-                    records.append(
-                        { 'Value': a[1] }
-                    )
-            else:
+            for r in values:
                 records.append(
-                    { 'Value': a[1] }
+                    { 'Value': r }
                 )
             changes.append(
                 {
                     'Action': 'UPSERT',
                     'ResourceRecordSet': {
-                        'Name': a[0],
-                        'Type': a[2],
-                        'TTL': 30,
+                        'Name': name,
+                        'Type': rrtype,
+                        'TTL': ttl,
                         'ResourceRecords': records
                     }
                 }
@@ -199,7 +199,8 @@ class AwsDnsManagement(InjectableModel):
             logger.warning(f'Not setting DNS for {model}: {name} does not fall within {zone.name}')
         else:
             logger.debug(f'{name} is at {str(link.public_v4_address)}')
-            await zone.update_record((name, str(link.public_v4_address), 'A'))
+            await zone.update_record((name, 'A', str(link.public_v4_address)),
+                                     ttl=30)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
