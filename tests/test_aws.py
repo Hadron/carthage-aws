@@ -107,3 +107,13 @@ async def test_security_groups(carthage_layout):
         assert layout.no_access.existing_egress == set()
     finally:
         await layout.no_access.delete()
+
+@async_test
+async def test_elastic_ip(carthage_layout):
+    layout = carthage_layout
+    con = await layout.ainjector.get_instance_async(AwsConnection)
+    await layout.ip_1.async_become_ready()
+    try:
+        assert layout.ip_1.ip_address
+    finally: await layout.ip_1.delete()
+    

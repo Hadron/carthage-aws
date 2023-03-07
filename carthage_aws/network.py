@@ -1,4 +1,4 @@
-# Copyright (C) 2022, Hadron Industries, Inc.
+# Copyright (C) 2022, 2023, Hadron Industries, Inc.
 # Carthage is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
 # as published by the Free Software Foundation. It is distributed
@@ -340,3 +340,45 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
 
         except ClientError as e:
             logger.error(f'Could not create AWS subnet {self.name} due to {e}.')
+
+@inject_autokwargs(
+    ip_address = InjectionKey('ip_address', _optional=NotPresent))
+class VpcAddress(AwsManaged):
+
+    resource_type = 'elastic_ip'
+    stamp_type = 'elastic_ip'
+    ip_address = None
+
+
+    async def find(self):
+        '''If ip_address is set and id is not, then try to find an ip_address matching.
+        '''
+        def callback():
+            return self.connection.client.describe_addresses(
+                PublicIps=[self.ip_address])
+
+        if self.ip_address and not self.id:
+            try:
+                r = await run_in_executor(callback)
+            except ClientError:
+                raise ValueError('IP address specified but does not exist')
+            self.id = r['Addresses'][0]['AllocationId']
+        res =  await super().find()
+        if self.mob:
+            self.ip_address = self.mob.public_ip
+        return res
+
+    def do_create(self):
+        #executor context
+        r = self.connection.client.allocate_address(Domain='vpc',
+                                                    TagSpecifications=[self.resource_tags])
+        self.id = r['AllocationId']
+
+
+    async def delete(self):
+        if self.mob:
+            await run_in_executor(self.mob.release)
+
+__all__ += ['VpcAddress']
+
+
