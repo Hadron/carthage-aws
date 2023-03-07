@@ -40,6 +40,8 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
         add('eth0', mac=None,
             net=InjectionKey("our_net"))
 
+
+
     class test_vm(MachineModel):
         name="test-vm"
         cloud_init = True
@@ -127,4 +129,12 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
     
     class ip_1(VpcAddress):
         name = 'address_1'
+
+    class ip_test(MachineModel):
+        
+        class net_config(NetworkConfigModel):
+            add('eth0', mac=None,
+                    net=InjectionKey("our_net"),
+                public_v4_address=ip_1)
+
         

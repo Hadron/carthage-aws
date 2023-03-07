@@ -115,5 +115,7 @@ async def test_elastic_ip(carthage_layout):
     await layout.ip_1.async_become_ready()
     try:
         assert layout.ip_1.ip_address
+        await layout.ip_test.resolve_networking()
+        breakpoint()
     finally: await layout.ip_1.delete()
     

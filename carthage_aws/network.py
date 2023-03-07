@@ -349,6 +349,10 @@ class VpcAddress(AwsManaged):
     stamp_type = 'elastic_ip'
     ip_address = None
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls.name:
+            provides(InjectionKey(VpcAddress, name=cls.name))(cls)
 
     async def find(self):
         '''If ip_address is set and id is not, then try to find an ip_address matching.
