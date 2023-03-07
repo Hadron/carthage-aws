@@ -10,6 +10,8 @@ from carthage.dependency_injection import *
 from carthage.network import NetworkLink
 from carthage.config import ConfigLayout
 from carthage.modeling import *
+from carthage.dns import DnsZone
+import collections.abc
 
 from pathlib import Path
 import os
@@ -23,7 +25,7 @@ from datetime import datetime
 
 __all__ = ['AwsHostedZone', 'AwsDnsManagement']
 
-class AwsHostedZone(AwsManaged):
+class AwsHostedZone(AwsManaged, DnsZone):
     
     pass_name_to_super = False
 
@@ -40,16 +42,6 @@ class AwsHostedZone(AwsManaged):
     @memoproperty
     def service_resource(self):
         return self.connection.connection.client('route53', region_name=self.connection.region)
-
-    def contains(self, name):
-        '''
-        Returns `bool` representing whether or not zone should contain name
-        '''
-        # we trim the trailing dot that is returned from the API
-        # so we just trim the dot on the fqdn we are passed if it has one
-        if name.endswith('.'):
-            name = name[:-1]
-        return name.endswith(self.name)
 
 
     def find_from_name(self):
@@ -126,7 +118,7 @@ class AwsHostedZone(AwsManaged):
         Updates aws route53 record(s)
         Arguments::
             *args : must be sequences representing records
-            record (sequence) : (Name, type, mValue) must be specified
+            record (sequence) : (Name, type, Value) must be specified
                 Value may be list or str
 
         Typical usage::
