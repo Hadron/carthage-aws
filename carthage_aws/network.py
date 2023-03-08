@@ -365,7 +365,7 @@ class VpcAddress(AwsManaged):
             try:
                 r = await run_in_executor(callback)
             except ClientError:
-                raise ValueError('IP address specified but does not exist')
+                raise LookupError('IP address specified but does not exist')
             self.id = r['Addresses'][0]['AllocationId']
         res =  await super().find()
         if self.mob:
@@ -381,6 +381,10 @@ class VpcAddress(AwsManaged):
 
     async def delete(self):
         if self.mob:
+            try:
+                await run_in_executor(self.mob.load)
+                if self.mob.association: await run_in_executor(self.mob.association.delete)
+            except Exception: pass
             await run_in_executor(self.mob.release)
 
 __all__ += ['VpcAddress']

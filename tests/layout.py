@@ -131,7 +131,8 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
         name = 'address_1'
 
     class ip_test(MachineModel):
-        
+
+        aws_instance_type = 't3.micro'
         class net_config(NetworkConfigModel):
             add('eth0', mac=None,
                     net=InjectionKey("our_net"),

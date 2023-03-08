@@ -1,4 +1,4 @@
-# Copyright (C) 2022, Hadron Industries, Inc.
+# Copyright (C) 2022, 2023, Hadron Industries, Inc.
 # Carthage is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
 # as published by the Free Software Foundation. It is distributed
@@ -23,7 +23,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from .connection import AwsConnection, AwsManaged, run_in_executor
-from .network import AwsVirtualPrivateCloud, AwsSubnet, AwsSecurityGroup
+from .network import AwsVirtualPrivateCloud, AwsSubnet, AwsSecurityGroup, VpcAddress
 
 __all__ = ['AwsVm']
 
@@ -129,7 +129,15 @@ class AwsVm(AwsManaged, Machine):
             if not ('PublicIp' in association and association['PublicIp']): continue
             address = IPv4Address(association['PublicIp'])
             if address != network_link.public_v4_address:
-                network_link.public_v4_address = address
+                if getattr(network_link,'vpc_address_allocation', None):
+                    # Configured to use a specific elastic address
+                    logger.info(f'{self.id} associating elastic IP for {network_link.public_v4_address}')
+                    self.connection.client.associate_address(
+                        AllocationId=network_link.vpc_address_allocation,
+                        NetworkInterfaceId=interface.id)
+                else:
+                    # public_v4_address being updated from association
+                    network_link.public_v4_address = address
                 updated_links.append(network_link)
                 if update_ip_address:
                     self.ip_address = str(address)
@@ -167,6 +175,13 @@ class AwsVm(AwsManaged, Machine):
             if l.local_type: continue
             l.security_group_ids = await self.ainjector(
                 find_security_groups, l, l.net_instance.vpc.groups)
+            if l.public_v4_address:
+                try:
+                    vpc_address = await self.ainjector(VpcAddress, ip_address=str(l.public_v4_address))
+                    l.vpc_address_allocation = vpc_address.id
+                except LookupError:
+                    logger.warning(f'{self} interface {l.interface} has public address that cannot be assigned')
+                    
             
 
     @setup_task("Create VM", order=AwsManaged.find_or_create.order)
@@ -192,7 +207,7 @@ class AwsVm(AwsManaged, Machine):
             if l.merged_v4_config.address:
                 assert l.merged_v4_config.address in l.net.v4_config.network.hosts(),f"{l.merged_v4_config.address} is not a hostaddr in {l.net.v4_config.network} for host {self.name}"
                 d['PrivateIpAddress'] = l.merged_v4_config.address.compressed
-            if len(self.network_links) == 1:
+            if len(self.network_links) == 1 or l.public_v4_address:
                 d['AssociatePublicIpAddress'] = True
             if hasattr(l, 'security_group_ids'):
                 d['Groups'] = l.security_group_ids
