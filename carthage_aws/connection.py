@@ -1,4 +1,4 @@
-# Copyright (C) 2022, Hadron Industries, Inc.
+# Copyright (C) 2022, 2023, Hadron Industries, Inc.
 # Carthage is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
 # as published by the Free Software Foundation. It is distributed
@@ -24,6 +24,7 @@ __all__ = ['AwsConnection', 'AwsManaged']
 resource_factory_methods = dict(
     instance='Instance',
     vpc='Vpc',
+    elastic_ip='VpcAddress',
     subnet='Subnet',
     volume='Volume',
     image='Image',
