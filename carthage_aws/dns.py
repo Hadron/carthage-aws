@@ -192,7 +192,7 @@ class AwsDnsManagement(InjectableModel):
             logger.warning(f'Not setting DNS for {model}: {name} does not fall within {zone.name}')
         else:
             logger.debug(f'{name} is at {str(link.public_v4_address)}')
-            await zone.update_record((name, 'A', str(link.public_v4_address)),
+            await zone.update_record((name, 'A', [str(link.public_v4_address)]),
                                      ttl=30)
 
     def __init__(self, **kwargs):
