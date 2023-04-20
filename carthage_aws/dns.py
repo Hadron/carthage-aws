@@ -137,7 +137,8 @@ class AwsHostedZone(AwsManaged, DnsZone):
             if isinstance(values, str) and values in self.allrrtype:
                 warnings.warn('update_records now takes name, type, value not name, value, type')
                 values, rrtype = rrtype, values
-            if not isinstance(values, collections.abc.Sequence): values = (values,)
+            if isinstance(values, str) or not isinstance(values, collections.abc.Sequence):
+                values = (values,)
             assert rrtype in self.allrrtype,ValueError(f"{rrtype} must be a valid rrtype {self.allrrtype}")
             records = []
             for r in values:
