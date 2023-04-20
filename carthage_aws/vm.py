@@ -128,16 +128,16 @@ class AwsVm(AwsManaged, Machine):
             association = interface.association_attribute
             if not ('PublicIp' in association and association['PublicIp']): continue
             address = IPv4Address(association['PublicIp'])
-            if address != network_link.public_v4_address:
+            if address != network_link.merged_v4_config.public_address:
                 if getattr(network_link,'vpc_address_allocation', None):
                     # Configured to use a specific elastic address
-                    logger.info(f'{self.id} associating elastic IP for {network_link.public_v4_address}')
+                    logger.info(f'{self.id} associating elastic IP for {network_link.merged_v4_config.public_address}')
                     self.connection.client.associate_address(
                         AllocationId=network_link.vpc_address_allocation,
                         NetworkInterfaceId=interface.id)
                 else:
                     # public_v4_address being updated from association
-                    network_link.public_v4_address = address
+                    network_link.merged_v4_config.public_address = address
                 updated_links.append(network_link)
                 if update_ip_address:
                     self.ip_address = str(address)
@@ -175,9 +175,9 @@ class AwsVm(AwsManaged, Machine):
             if l.local_type: continue
             l.security_group_ids = await self.ainjector(
                 find_security_groups, l, l.net_instance.vpc.groups)
-            if l.public_v4_address:
+            if l.merged_v4_config.public_address:
                 try:
-                    vpc_address = await self.ainjector(VpcAddress, ip_address=str(l.public_v4_address))
+                    vpc_address = await self.ainjector(VpcAddress, ip_address=str(l.merged_v4_config.public_address))
                     l.vpc_address_allocation = vpc_address.id
                 except LookupError:
                     logger.warning(f'{self} interface {l.interface} has public address that cannot be assigned')
@@ -207,7 +207,7 @@ class AwsVm(AwsManaged, Machine):
             if l.merged_v4_config.address:
                 assert l.merged_v4_config.address in l.net.v4_config.network.hosts(),f"{l.merged_v4_config.address} is not a hostaddr in {l.net.v4_config.network} for host {self.name}"
                 d['PrivateIpAddress'] = l.merged_v4_config.address.compressed
-            if len(self.network_links) == 1 or l.public_v4_address:
+            if len(self.network_links) == 1 or l.merged_v4_config.public_address:
                 d['AssociatePublicIpAddress'] = True
             if hasattr(l, 'security_group_ids'):
                 d['Groups'] = l.security_group_ids

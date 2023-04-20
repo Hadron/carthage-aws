@@ -136,6 +136,6 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
         class net_config(NetworkConfigModel):
             add('eth0', mac=None,
                     net=InjectionKey("our_net"),
-                public_v4_address=ip_1)
+                v4_config=V4Config(public_address=ip_1))
 
         

@@ -117,7 +117,7 @@ async def test_elastic_ip(carthage_layout):
         assert layout.ip_1.ip_address
         await layout.ip_test.resolve_networking()
         await layout.ip_test.machine.async_become_ready()
-        assert str(layout.ip_test.network_links['eth0'].public_v4_address )== layout.ip_1.ip_address
+        assert str(layout.ip_test.network_links['eth0'].merged_v4_config.public_address )== layout.ip_1.ip_address
     finally:
         if layout.ip_test.machine.mob:
             await layout.ip_test.machine.delete()
