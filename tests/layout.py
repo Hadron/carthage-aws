@@ -12,14 +12,15 @@ from carthage_aws import *
 from carthage_base import CarthageServerRole, DebianImage
 from carthage.modeling import *
 from carthage.cloud_init import WriteAuthorizedKeysPlugin
+from carthage.dns import *
 
-class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
+class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
 
     layout_name = 'aws_test'
 
     add_provider(DebianImage)
     add_provider(machine_implementation_key, dependency_quote(AwsVm))
-    add_provider(InjectionKey(AwsHostedZone),
+    add_provider(InjectionKey(DnsZone, role='public_zone'),
                  when_needed(AwsHostedZone, name="autotest.photon.ac"))
     add_provider(WriteAuthorizedKeysPlugin, allow_multiple=True)
     #aws_key_name = 'main'
@@ -136,6 +137,6 @@ class test_layout(CarthageLayout, AwsDnsManagement, AnsibleModelMixin):
         class net_config(NetworkConfigModel):
             add('eth0', mac=None,
                     net=InjectionKey("our_net"),
-                v4_config=V4Config(public_address=ip_1))
+                v4_config=V4Config(public_address=injector_access(ip_1)))
 
         

@@ -170,33 +170,6 @@ class AwsHostedZone(AwsManaged, DnsZone):
 
 class AwsDnsManagement(InjectableModel):
 
-    '''
-    A Carthage modeling mixin that updates DNS records in a given zone when included models  gain an IP address.  Typical usage::
-
-        class some_enclave(Enclave, AwsDnsManagement):
-
-            domain = "machines.example.com"
-            add_provider(InjectionKey(AwsHostedZone), when_needed(AwsHostedZone, name=domain))
-
-            class some_machine(MachineModel): ...
-
-    Then, when `some_machine` gains an IP address, an `A` record will be created.
-
-    '''
-
-    async def public_ip_updated(self, target, **kwargs):
-        link = target
-        model = link.machine
-        zone = await self.ainjector.get_instance_async(InjectionKey(AwsHostedZone, _ready=True))
-        name = link.dns_name or model.name
-        if not zone.contains(name):
-            logger.warning(f'Not setting DNS for {model}: {name} does not fall within {zone.name}')
-        else:
-            logger.debug(f'{name} is at {str(link.public_v4_address)}')
-            await zone.update_record((name, 'A', [str(link.public_v4_address)]),
-                                     ttl=30)
-
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.injector.add_event_listener(InjectionKey(NetworkLink), 'public_address', self.public_ip_updated)
-        
+        raise TypeError('Use the core PublicDnsManagement Classfrom carthage.dns  instead.  Note that it requires slightly different configuration')
+    
