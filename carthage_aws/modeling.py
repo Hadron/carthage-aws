@@ -99,12 +99,16 @@ class AwsVpcNetworkModel(NetworkModel):
         return InjectionKey(AwsVpcNetworkModel, name=self.name)
 
     async def async_ready(self):
+
         if isinstance(self.vpc, AwsVirtualPrivateCloudModel):
-            obj = self.vpc.vpc
+            key = InjectionKey(MachineImplementation)
+            ainjector = self.vpc.injector(AsyncInjector)
+            obj = await ainjector.get_instance_async(key)
         elif isinstance(self.vpc, str):
             key = InjectionKey(AwsVirtualPrivateCloud, name=self.vpc, _ready=False)
             obj = await self.ainjector.get_instance_async(key)
         else:
             raise ValueError
+
         self.ainjector.add_provider(InjectionKey(AwsVirtualPrivateCloud), obj)
         await super().async_ready()
