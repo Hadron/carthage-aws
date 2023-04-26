@@ -110,11 +110,11 @@ class AwsHostedZone(AwsManaged, DnsZone):
         def callback():
             assert type(parent) is AwsHostedZone
             assert self.name.partition('.')[2] == parent.name
-            parent.update_record((self.name, 'NS', self.nameservers))
+            parent.update_records((self.name, 'NS', self.nameservers))
         return await run_in_executor(callback)
 
     # could decorate for other actions
-    async def update_record(self, *args, ttl=300):
+    async def update_records(self, *args, ttl=300):
         '''
         Updates aws route53 record(s)
         Arguments::
