@@ -39,6 +39,8 @@ class AwsConfig(ConfigSchema, prefix = "aws"):
     #:aws_secret_access_key
     secret_access_key: ConfigString
 
+    #: Profile name from ~/.aws/credentials
+    profile: ConfigString
     #:AWS region
     region: ConfigString
 
