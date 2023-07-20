@@ -223,27 +223,44 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             return [obj['ResourceId'] for obj in objs]
         return []
 
+    def __repr__(self):
+        if self.name:
+            return f'<{self.__class__.__name__} ({self.name}) at 0x{id(self):0x}>'
+        else:
+            return f'<anonymous {self.__class__.__name__} at 0x{id(self):0x}>'
+
     @setup_task("construct", order=700)
     async def find_or_create(self):
-        if self.mob: return
+
+        if self.mob:
+            return
+
         # If we are called directly, rather than through setup_tasks,
         # then our check_completed will not have run, so we should
         # explicitly try find, because double creating is bad.
+
         await self.find()
+
         if self.mob:
             await self.ainjector(self.post_find_hook)
             return
-        if not self.name: raise RuntimeError('You must specify a name for creation')
+
+        if not self.name:
+            raise RuntimeError(f'unable to create AWS resource for {self} without a name')
         if self.readonly:
-            raise LookupError(f'{self.__class__.__name__} with name {self.name} not found and readonly enabled.')
+            raise LookupError(f'unable to find AWS resource for {self} and creation was not enabled')
 
         await self.ainjector(self.pre_create_hook)
         await run_in_executor(self.do_create)
-        assert self.mob or self.id
+
+        if not (self.mob or self.id):
+            raise RuntimeError(f'do_create failed to create AWS resource for {self}')
+
         if not self.mob:
             await self.find()
-        else:
-            if not self.id: self.id = self.mob.id
+        elif not self.id:
+            self.id = self.mob.id
+
         await self.ainjector(self.post_create_hook)
         await self.ainjector(self.post_find_hook)
         return self.mob

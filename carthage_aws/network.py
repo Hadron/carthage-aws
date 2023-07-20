@@ -339,7 +339,7 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
             # No need to associate subnet with main route table
 
         except ClientError as e:
-            logger.error(f'Could not create AWS subnet {self.name} due to {e}.')
+            raise RuntimeError(f'unable to create AWS subnet for {self}: {e}')
 
 @inject_autokwargs(
     ip_address = InjectionKey('ip_address', _optional=NotPresent))
