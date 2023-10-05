@@ -8,6 +8,7 @@
 import dataclasses
 import ipaddress
 import typing
+import warnings
 from carthage import *
 from carthage.dependency_injection import *
 from carthage.network import TechnologySpecificNetwork, this_network
@@ -127,6 +128,11 @@ class SgRule:
         if isinstance(cidr_in, (ipaddress.IPv4Network, str)):
             cidr_in = [cidr_in]
         cidr_out = frozenset(map(lambda cidr: ipaddress.IPv4Network(cidr), cidr_in))
+        allzeros_32 = ipaddress.IPv4Network('0.0.0.0/32')
+        for e in cidr_out:
+            if e == allzeros_32:
+                warnings.warn("You selected a cidr address of 0.0.0.0/32 not 0.0.0.0/0; you almost certainly do not want this", stacklevel=4)
+                break
         return cidr_out
 
     @staticmethod
