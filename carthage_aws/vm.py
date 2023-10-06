@@ -208,7 +208,7 @@ class AwsVm(AwsManaged, Machine):
                 assert l.merged_v4_config.address in l.net.v4_config.network.hosts(),f"{l.merged_v4_config.address} is not a hostaddr in {l.net.v4_config.network} for host {self.name}"
                 d['PrivateIpAddress'] = l.merged_v4_config.address.compressed
             if len(self.network_links) == 1 or l.merged_v4_config.public_address:
-                d['AssociatePublicIpAddress'] = True
+                d['AssociatePublicIpAddress'] = not l.merged_v4_config.public_address is False
             if hasattr(l, 'security_group_ids'):
                 d['Groups'] = l.security_group_ids
             network_interfaces.append(d)
