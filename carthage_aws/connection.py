@@ -26,6 +26,7 @@ resource_factory_methods = dict(
     vpc='Vpc',
     elastic_ip='VpcAddress',
     subnet='Subnet',
+    snapshot='Snapshot',
     volume='Volume',
     image='Image',
     security_group='SecurityGroup',
@@ -141,7 +142,7 @@ Run in executor context.
 @inject_autokwargs(config_layout=ConfigLayout,
                    connection=InjectionKey(AwsConnection, _ready=True),
                                       readonly = InjectionKey("aws_readonly", _optional=True),
-                   id=InjectionKey("aws_id", _optional=True),
+                   id=InjectionKey("aws_id", _optional=NotPresent),
                    )
 class AwsManaged(SetupTaskMixin, AsyncInjectable):
 
@@ -153,7 +154,6 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         if name and self.pass_name_to_super: kwargs['name'] = name
         if name: self.name = name
         super().__init__(**kwargs)
-        if self.id is None and self.__class__.id: self.id = self.__class__.id
         if not self.readonly: self.readonly = bool(self.id)
         self.mob = None
         

@@ -29,8 +29,8 @@ __all__ += ['AwsVm', 'MaybeLocalAwsVm']
 from .image import AwsImage, image_provider, debian_ami_owner, ImageBuilderVolume, AttachImageBuilderVolume, build_ami
 __all__ += ['AwsImage', 'image_provider', 'debian_ami_owner', 'AttachImageBuilderVolume', 'ImageBuilderVolume', 'build_ami']
 
-from .ebs import AwsVolume, attach_volume_task
-__all__ += ['AwsVolume', 'attach_volume_task']
+from .ebs import AwsVolume, attach_volume_task, AwsSnapshot
+__all__ += ['AwsVolume', 'attach_volume_task', 'AwsSnapshot']
 
 class AwsConfig(ConfigSchema, prefix = "aws"):
     #:aws_access_key_id
