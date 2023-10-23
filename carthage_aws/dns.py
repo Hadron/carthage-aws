@@ -31,13 +31,10 @@ class AwsHostedZone(AwsManaged, DnsZone):
     pass_name_to_super = False
 
     def __init__(self, **kwargs):
+        self.private = kwargs.pop('private', False)
         super().__init__(**kwargs)
-
         self.allrrtype = ['SOA','A','TXT','NS','CNAME','MX','NAPTR','PTR','SRV','SPF','AAAA','CAA','DS']
-
         self.region = self.config_layout.aws.region
-        self.private = False
-
         self.client = self.service_resource
 
     @memoproperty
@@ -60,9 +57,14 @@ class AwsHostedZone(AwsManaged, DnsZone):
         try:
             r = self.client.get_hosted_zone(Id=self.id)
             # perhaps we want to wrap mob as dict of attrs
+            if False:
+                breakpoint()
             self.mob = r
             self.config = r['HostedZone']['Config']
-            self.nameservers = r['DelegationSet']['NameServers']
+            if 'DelegationSet' in r:
+                self.nameservers = r['DelegationSet']['NameServers']
+            else:
+                self.nameservers = None
             self.name = r['HostedZone']['Name']
             if self.name.endswith('.'): self.name = self.name[:-1]
         except ClientError as e:
@@ -100,11 +102,16 @@ class AwsHostedZone(AwsManaged, DnsZone):
             # [12:] is because we want to trim `/hostedzone/` off of the zone Id
             self.id = r['HostedZone']['Id'][12:]
             self.config = r['HostedZone']['Config']
-            self.nameservers = r['DelegationSet']['NameServers']
+            if 'DelegationSet' in r:
+                self.nameservers = r['DelegationSet']['NameServers']
+            else:
+                self.nameservers = None
             self.name = r['HostedZone']['Name'][:-1]
         except ClientError as e:
+            breakpoint()
             logger.error(f'Could not create AwsHostedZone for \
 {self.name} because {e}.')
+            raise
 
     async def delegate_zone(self, parent):
         def callback():
