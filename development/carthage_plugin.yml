@@ -7,3 +7,4 @@ config:
   aws:
     region: us-east-1
     vpc_name: test_vpc
+production_ssh_agent: true

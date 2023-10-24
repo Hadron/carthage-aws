@@ -7,6 +7,9 @@ class DevelopmentSchema(ConfigSchema, prefix="developer"):
     
     domain: str#: Name of primary developer vm
     machine: str
+    iam_profile:str = None
+    carthage_viewer: bool = True
+    
 
 @inject(injector=Injector)
 def carthage_plugin(injector):
