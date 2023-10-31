@@ -282,7 +282,8 @@ class AwsVm(AwsManaged, Machine):
             await run_in_executor(self.mob.stop)
             await run_in_executor(self.mob.wait_until_stopped)
             if self._clear_ip_address:
-                del self.ip_address
+                try: del self.ip_address
+                except AttributeError: pass
             self.running = False
             await super().stop_machine()
 
