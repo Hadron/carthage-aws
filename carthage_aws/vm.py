@@ -23,7 +23,6 @@ import boto3
 from botocore.exceptions import ClientError
 
 from .connection import AwsConnection, AwsManaged, run_in_executor
-from .network import AwsVirtualPrivateCloud, AwsSubnet, AwsSecurityGroup, VpcAddress
 
 __all__ = ['AwsVm']
 
@@ -76,7 +75,9 @@ async def find_security_groups(l:NetworkLink, vpc_groups, *, ainjector):
     groups = {g['GroupName']:g['GroupId'] for g in l.net_instance.vpc.groups}
     results = []
     for g in desired_groups:
-        g_obj = await ainjector.get_instance_async(InjectionKey(AwsSecurityGroup, name=g, _optional=True))
+        g_obj = await l.net.ainjector.get_instance_async(InjectionKey(AwsSecurityGroup, name=g, _optional=True))
+        if not g_obj:
+            g_obj = await ainjector.get_instance_async(InjectionKey(AwsSecurityGroup, name=g, _optional=True))
         if g_obj: results.append(g_obj.id)
         elif g in groups:
             results.append(groups[g])
@@ -297,7 +298,18 @@ class AwsVm(AwsManaged, Machine):
 
     async def delete(self):
         await run_in_executor(self.mob.terminate)
-        
+
+    async def root_device_and_volume(self):
+        ''':returns: tuple of root device and volume'''
+        from .ebs import AwsVolume
+        if not self.mob: await self.find()
+        rootdev = self.mob.root_device_name
+        for mapping in self.mob.block_device_mappings:
+            if mapping['DeviceName'] == rootdev:
+                return rootdev, await self.ainjector(
+                    AwsVolume, id=mapping['Ebs']['VolumeId'], readonly=True)
+        raise ValueError('Root device mapping not found')
+    
     stamp_type = 'vm'
     resource_type = 'instance'
 
@@ -318,3 +330,6 @@ except ImportError:
             raise NotImplementedError('MaybeLocalAwsVm requires carthage_base available')
 
 __all__ += ['MaybeLocalAwsVm']
+
+# At the end so that network can inject an AwsVm
+from .network import  AwsSubnet, AwsSecurityGroup, VpcAddress
