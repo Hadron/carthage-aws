@@ -55,15 +55,17 @@ class AwsVolume(AwsManaged, InjectableModel):
         await run_in_executor(self.mob.delete)
 
 
-    async def wait_for_available(self):
+    async def wait_for_available(self, expected_states=None):
+        if expected_states is None:
+            expected_states = {'creating'}
         tries = 0
         max_tries = self._gfi('aws_volume_timeout', 150)//5
         if self.mob.state == 'available': return
-        if self.mob.state != 'creating':
-            raise RuntimeError('Unexpected state')
+        if self.mob.state not in expected_states:
+            raise RuntimeError(f'Unexpected state: {self.mob.state}')
         
         while tries < max_tries:
-            if self.mob.state != 'creating': return
+            if self.mob.state  not in expected_states: return
             await asyncio.sleep(5)
             await run_in_executor(self.mob.reload)
             tries += 1
@@ -107,9 +109,10 @@ class AwsVolume(AwsManaged, InjectableModel):
             assert isinstance(instance.machine,AwsVm)
             instance_id = instance.machine.id
         else: instance_id = instance
-        await self.wait_for_available()
+        assert self.mob.state == 'in-use', "Volume should be in-use before detaching"
         await run_in_executor(callback)
-        
+        await self.wait_for_available(expected_states={'in-use', 'detaching'})
+
 __all__ += ['AwsVolume']
 
 def attach_volume_task(*, device, volume, delete_on_termination=True):
