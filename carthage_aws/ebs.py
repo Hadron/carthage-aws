@@ -91,6 +91,24 @@ class AwsVolume(AwsManaged, InjectableModel):
         else: instance_id = instance
         await self.wait_for_available()
         await run_in_executor(callback)
+
+    async def detach(self, instance, device):
+        from .vm import AwsVm
+        def callback():
+            self.connection.client.detach_volume(
+                VolumeId=self.id,
+                InstanceId=instance_id,
+                Device=device)
+            self.mob.reload()
+
+        if isinstance(instance,AwsVm):
+            instance_id = instance.id
+        elif isinstance(instance,AbstractMachineModel):
+            assert isinstance(instance.machine,AwsVm)
+            instance_id = instance.machine.id
+        else: instance_id = instance
+        await self.wait_for_available()
+        await run_in_executor(callback)
         
 __all__ += ['AwsVolume']
 
