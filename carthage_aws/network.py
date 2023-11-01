@@ -14,6 +14,8 @@ from carthage.dependency_injection import *
 from carthage.network import TechnologySpecificNetwork, this_network
 from carthage.config import ConfigLayout
 from carthage.modeling import NetworkModel, InjectableModel, provides
+from carthage.utils import when_needed
+import carthage.machine
 
 from .connection import AwsConnection, AwsManaged, run_in_executor
 
@@ -35,12 +37,14 @@ class AwsVirtualPrivateCloud(AwsManaged):
     def __init__(self,  **kwargs):
         super().__init__( **kwargs)
         config = self.config_layout
-        if config.aws.vpc_name == None:
-            self.name = ''
-        else: self.name = config.aws.vpc_name
-        if config.aws.vpc_id == None:
-            self.id = ''
-        else: self.id = config.aws.vpc_id
+        if self.name is None:
+            if config.aws.vpc_name == None:
+                self.name = ''
+            else: self.name = config.aws.vpc_name
+        if self.id is None:
+            if config.aws.vpc_id == None:
+                self.id = ''
+            else: self.id = config.aws.vpc_id
         self.vms = []
 
 
@@ -197,7 +201,7 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
 
     #: If true, create tags when the resource is created
     include_tags = True
-    
+
     stamp_type = "security-group"
     resource_type = "security_group"
 
@@ -229,7 +233,7 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
             provides(cls.our_key())(cls)
         except AttributeError: pass
         super().__init_subclass__(**kwargs)
-        
+
 
     def do_create(self):
         self.mob = self.service_resource.create_security_group(
@@ -309,8 +313,8 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
         if self.include_tags and self.name:
             return super().resource_tags
         return []
-    
-            
+
+
 
 @inject_autokwargs(connection = InjectionKey(AwsConnection, _ready=True),
                    network=this_network,
@@ -396,3 +400,43 @@ class VpcAddress(AwsManaged):
 __all__ += ['VpcAddress']
 
 
+
+@inject(vm=InjectionKey(carthage.machine.Machine, _ready=False),
+        security_groups=InjectionKey('aws_vm_network_security_groups', _optional=True))
+async def network_for_existing_vm(vm, security_groups):
+    '''
+    Usage typically within a machine model::
+
+        add_provider(InjectionKe("instance_network"), network_for_existing_vm)
+
+        class network_config(NetworkConfigModel):
+            add('eth0', mac=None, net=InjectionKey("instance_network"))
+
+    This will look up the network associated with an existing VM and instantiate it in the model.  It can be used for example as an up-propagation to put another new instance on the same network.
+    '''
+    from .vm import AwsVm
+    from carthage.modeling import NetworkModel, injector_access
+    if not isinstance(vm, AwsVm):
+        raise TypeError(f'{vm} did not end up being an AwsVm')
+    await vm.find()
+    if not vm.mob: raise LookupError(f'Failed to find existing {vm}')
+    vpc_id =vm.mob.subnet.vpc_id
+    try:
+        vpc = await vm.ainjector.get_instance_async(InjectionKey(AwsVirtualPrivateCloud, id=vpc_id, _ready=False))
+    except KeyError: vpc = None
+    class vm_network(NetworkModel):
+        v4_config = V4Config(network=vm.mob.subnet.cidr_block)
+        for sg in security_groups or []:
+            add_provider(sg, force_multiple_instantiate=True)
+        try: del sg
+        except NameError: pass
+        if vpc:
+            add_provider(InjectionKey(AwsVirtualPrivateCloud), injector_xref(
+                InjectionKey(AwsVirtualPrivateCloud, id=vpc_id)))
+        else:
+            add_provider(InjectionKey(AwsVirtualPrivateCloud),
+                         when_needed(AwsVirtualPrivateCloud, id=vpc_id))
+
+    return await vm.ainjector(vm_network)
+
+__all__ += ['network_for_existing_vm']
