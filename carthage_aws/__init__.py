@@ -44,6 +44,9 @@ class AwsConfig(ConfigSchema, prefix = "aws"):
     #:AWS region
     region: ConfigString
 
+    keypair_id: ConfigString
+    keypair_name: ConfigString
+
     #:AWS VPC name
     vpc_name: ConfigString
 

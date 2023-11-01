@@ -18,13 +18,14 @@ from carthage.machine import Machine
 from carthage.network import NetworkConfig, NetworkLink
 from carthage.local import LocalMachineMixin
 from carthage.cloud_init import generate_cloud_init_cloud_config
+import logging
 
 import boto3
 from botocore.exceptions import ClientError
 
 from .connection import AwsConnection, AwsManaged, run_in_executor
 
-__all__ = ['AwsVm']
+__all__ = ['AwsVm', 'UserDataProvider']
 
 @inject(
     connection=AwsConnection,
@@ -34,8 +35,9 @@ __all__ = ['AwsVm']
     )
 async def generate_block_device_mappings(connection, ami, model, volume_type):
     if volume_type is None: volume_type ='gp2'
-    services =         connection .connection.resource('ec2', region_name=connection.region)
+    services = connection .connection.resource('ec2', region_name=connection.region)
     image = services.Image(ami)
+    image.load()
     mappings = []
     disk_sizes = model.disk_sizes
     disk_name = '/dev/xvda'
@@ -86,6 +88,11 @@ async def find_security_groups(l:NetworkLink, vpc_groups, *, ainjector):
     return results
 
         
+
+@inject_autokwargs(model = AbstractMachineModel)
+class UserDataProvider(Injectable):
+    async def generate_user_data(self):
+        raise NotImplementedError
 
 @inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True),
                    )
@@ -167,6 +174,25 @@ class AwsVm(AwsManaged, Machine):
         else: self.cloud_config = None
         self.image_id = await self.ainjector.get_instance_async('aws_ami')
         self.iam_profile = await self.ainjector.get_instance_async(InjectionKey("aws_iam_profile", _optional=True))
+
+        if hasattr(self.model, 'private_addressing'):
+            self.private_addressing = self.model.private_addressing
+        else:
+            self.private_addressing = False
+
+        if hasattr(self.model, 'provide_user_data'):
+            if hasattr(self.model, 'cloud_init'):
+                logging.warning(f'{self.model} provides both cloud_init and provide_user_data; ignoring cloud_init')
+            self.user_data = await (await self.ainjector.get_instance_async(InjectionKey(UserDataProvider, _ready=True))).generate_user_data()
+            self.cloud_config = None
+        else:
+            self.user_data = None
+            if getattr(self.model, 'cloud_init', False):
+                self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
+            else:
+                self.cloud_config = None
+
+        self.image_id = await self.ainjector.get_instance_async('aws_ami')
         await self.start_dependencies()
         await super().start_machine()
         if hasattr(self.model, 'disk_sizes'):
@@ -210,18 +236,24 @@ class AwsVm(AwsManaged, Machine):
                 d['PrivateIpAddress'] = l.merged_v4_config.address.compressed
             if len(self.network_links) == 1 or l.merged_v4_config.public_address:
                 d['AssociatePublicIpAddress'] = not l.merged_v4_config.public_address is False
+            # this was specific to private addresses
+            if self.private_addressing:
+                d['AssociatePublicIpAddress'] = False
+            else:
+                if len(self.network_links) == 1:
+                    d['AssociatePublicIpAddress'] = True
+            # end
             if hasattr(l, 'security_group_ids'):
                 d['Groups'] = l.security_group_ids
             network_interfaces.append(d)
             device_index += 1
 
-
-        user_data = ""
-        if self.cloud_config:
-            user_data = "#cloud-config\n"
-            user_data += yaml.dump(self.cloud_config.user_data, default_flow_style=False)
+        user_data = self.user_data
+        if (user_data is None) and self.cloud_config:
+            user_data = "#cloud-config\n" + \
+                yaml.dump(self.cloud_config.user_data, default_flow_style=False)
             
-        logger.info(f'Starting {self.name} VM')
+        logger.info(f'Starting {self.name} with {user_data}')
 
         try:
             extra = {}
@@ -231,19 +263,24 @@ class AwsVm(AwsManaged, Machine):
                 extra['BlockDeviceMappings'] = self.block_device_mappings
             if self.iam_profile:
                 extra['IamInstanceProfile'] = dict(Name=self.iam_profile)
+            if user_data is not None:
+                extra['UserData'] = user_data
             r = self.connection.client.run_instances(
                 ImageId=self.image_id,
                 MinCount=1,
                 MaxCount=1,
+                # BootMode='uefi',
                 InstanceType=self._gfi('aws_instance_type'),
-                UserData=user_data,
                 NetworkInterfaces=network_interfaces,
                 TagSpecifications=[self.resource_tags],
                 **extra
             )
             self.id = r['Instances'][0]['InstanceId']
         except ClientError as e:
-            logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
+            if e.response['Error']['Code'] == 'InvalidIPAddress.InUse':
+                logging.error(f"{e.response['Error']['Message']} for host {self.name}")
+            else:
+                logger.error(f'Could not create AWS VM for {self.model.name} because {e}.')
             return True
 
     def find_from_id(self):
@@ -288,6 +325,7 @@ class AwsVm(AwsManaged, Machine):
             await super().stop_machine()
 
     async def is_machine_running(self):
+        # if 'infoblox_a' in self.name: breakpoint()
         if not self.mob: await self.find()
         if not self.mob:
             self.running = False
