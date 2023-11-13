@@ -32,9 +32,10 @@ class AwsVirtualPrivateCloud(AwsManaged):
     stamp_type = "vpc"
     resource_type = 'vpc'
 
+    vpc_cidr:str = None #: String representation of the v4 CIDR block for the VPC
 
 
-    def __init__(self,  **kwargs):
+    def __init__(self,  vpc_cidr=None, **kwargs):
         super().__init__( **kwargs)
         config = self.config_layout
         if self.name is None:
@@ -45,6 +46,9 @@ class AwsVirtualPrivateCloud(AwsManaged):
             if config.aws.vpc_id == None:
                 self.id = ''
             else: self.id = config.aws.vpc_id
+        if vpc_cidr: self.vpc_cidr = vpc_cidr
+        if self.vpc_cidr is None:
+            self.vpc_cidr = str(config.aws.vpc_cidr)
         self.vms = []
 
 
@@ -64,7 +68,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
         try:
             r = self.connection.client.create_vpc(
                     InstanceTenancy='default',
-                                                      CidrBlock=str(self.config_layout.aws.vpc_cidr),
+                                                      CidrBlock=self.vpc_cidr,
                     TagSpecifications=[self.resource_tags])
             self.id = r['Vpc']['VpcId']
 
@@ -105,11 +109,11 @@ class AwsVirtualPrivateCloud(AwsManaged):
         self.groups = list( groups['SecurityGroups'])
         return self.groups
 
-    def delete(self):
+    async def delete(self):
         for sn in self.mob.subnets.all():
-            sn.delete()
+            await run_in_executor(sn.delete)
         for g in self.mob.security_groups.all():
-            try: g.delete()
+            try: await run_in_executor(g.delete)
             except: pass
         for gw in self.mob.internet_gateways.all():
             gw.detach_from_vpc(VpcId=self.id)
@@ -117,7 +121,7 @@ class AwsVirtualPrivateCloud(AwsManaged):
         for rt in self.mob.route_tables.all():
             try: rt.delete()
             except: pass
-        self.mob.delete()
+        await run_in_executor(self.mob.delete)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -340,10 +344,15 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
 
 
     def do_create(self):
+        availability_zone = self._gfi("aws_availability_zone", default=None)
+        extra_args = {}
+        if availability_zone:
+            extra_args['AvailabilityZone'] = availability_zone
         try:
             r = self.connection.client.create_subnet(VpcId=self.vpc.id,
                                                      CidrBlock=str(self.network.v4_config.network),
-                                                     TagSpecifications=[self.resource_tags]
+                                                     TagSpecifications=[self.resource_tags],
+                                                     **extra_args
                                                      )
             self.id = r['Subnet']['SubnetId']
             # No need to associate subnet with main route table

@@ -123,3 +123,29 @@ async def test_elastic_ip(carthage_layout):
             await layout.ip_test.machine.delete()
         await layout.ip_1.delete()
     
+@async_test
+async def test_aws_subnet_create(ainjector):
+    '''
+    Test creation of a VPC and a subnet
+    '''
+    class creation_vpc(AwsVirtualPrivateCloud, InjectableModel):
+        name = 'creation_vpc'
+        vpc_cidr = '10.1.0.0/16'
+
+        class created_subnet(NetworkModel):
+            v4_config = V4Config(network='10.1.0.0/24')
+            aws_availability_zone = 'us-east-1c'
+    try:
+        ainjector.add_provider(creation_vpc)
+        vpc = None
+        vpc = await ainjector.get_instance_async(creation_vpc)
+        with instantiation_not_ready():
+            subnet = await vpc.created_subnet.access_by(AwsSubnet)
+        await subnet.find()
+        assert not subnet.mob
+        await subnet.async_become_ready()
+        assert subnet.mob
+        assert subnet.mob.availability_zone == subnet._gfi("aws_availability_zone")
+    finally:
+        if vpc: await vpc.delete()
+        
