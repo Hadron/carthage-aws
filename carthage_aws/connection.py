@@ -30,6 +30,9 @@ resource_factory_methods = dict(
     volume='Volume',
     image='Image',
     security_group='SecurityGroup',
+    route_table='RouteTable',
+    internet_gateway='InternetGateway',
+    
 )
 
 async def run_in_executor(func, *args):

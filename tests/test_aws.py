@@ -131,6 +131,13 @@ async def test_aws_subnet_create(ainjector):
     class creation_vpc(AwsVirtualPrivateCloud, InjectableModel):
         name = 'creation_vpc'
         vpc_cidr = '10.1.0.0/16'
+        class route_table(AwsRouteTable):
+            name = 'test_route_table'
+            
+        class igw(AwsInternetGateway):
+
+            name = 'test_igw'
+
 
         class created_subnet(NetworkModel):
             v4_config = V4Config(network='10.1.0.0/24')
