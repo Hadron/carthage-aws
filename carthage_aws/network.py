@@ -470,7 +470,7 @@ class AwsRouteTable(AwsManaged):
     stamp_type = "route_table"
     resource_type = "route_table"
 
-    def _add_route(self, net, target, kind=None):
+    def _add_route(self, destination, target, kind=None):
 
         from .transit import AwsTransitGateway
 
@@ -487,7 +487,7 @@ class AwsRouteTable(AwsManaged):
                 raise ValueError(f'unknown target type for: {target}')
 
         kwargs = {
-            'DestinationCidrBlock': net,
+            'DestinationCidrBlock': destination,
             f'{kind}Id': target.id
         }
         try:
@@ -498,7 +498,7 @@ class AwsRouteTable(AwsManaged):
     async def add_route(self, destination, target, kind, exists_ok=False):
         destination = await resolve_deferred(ainjector, destination, args=dict(target=target, kind=kind))
         target = await resolve_deferred(self.ainjector, target, args=dict(destination=destination, kind=kind))
-        await run_in_executor(self.add_route, destination, target, kind=kind)
+        await run_in_executor(self._add_route, destination, target, kind=kind)
 
     async def associate_subnet(self, subnet):
         def callback():
