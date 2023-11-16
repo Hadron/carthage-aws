@@ -37,7 +37,8 @@ class AwsVolume(AwsManaged, InjectableModel):
             await self.snapshot.wait_for_available()
         if self.snapshot and isinstance(self.snapshot,str):
             self.snapshot_id = self.snapshot
-        else: self.snapshot_id = self.snapshot.id
+        else:
+            if self.snapshot: self.snapshot_id = self.snapshot.id
             
         
 
