@@ -16,9 +16,11 @@ __all__ = []
 from .connection import AwsConnection
 __all__ += ['AwsConnection']
 
-from .network import AwsVirtualPrivateCloud, AwsSubnet, SgRule, AwsSecurityGroup, VpcAddress, network_for_existing_vm
+from .network import AwsVirtualPrivateCloud, AwsSubnet, SgRule, AwsSecurityGroup, VpcAddress, network_for_existing_vm, AwsRouteTable, AwsInternetGateway, AwsNatGateway
 __all__ += ['AwsVirtualPrivateCloud', 'AwsSubnet',
-            'AwsSecurityGroup', 'SgRule', 'VpcAddress', 'network_for_existing_vm']
+            'AwsSecurityGroup', 'SgRule',
+            'VpcAddress', 'network_for_existing_vm',
+            'AwsRouteTable', 'AwsInternetGateway', 'AwsNatGateway']
 
 from .dns import AwsHostedZone, AwsDnsManagement
 __all__ += ['AwsHostedZone', 'AwsDnsManagement']

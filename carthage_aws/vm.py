@@ -23,6 +23,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from .connection import AwsConnection, AwsManaged, run_in_executor
+from .network import aws_link_handle_eip
 
 __all__ = ['AwsVm']
 
@@ -177,12 +178,7 @@ class AwsVm(AwsManaged, Machine):
             l.security_group_ids = await self.ainjector(
                 find_security_groups, l, l.net_instance.vpc.groups)
             if l.merged_v4_config.public_address:
-                try:
-                    vpc_address = await self.ainjector(VpcAddress, ip_address=str(l.merged_v4_config.public_address))
-                    l.vpc_address_allocation = vpc_address.id
-                except LookupError:
-                    logger.warning(f'{self} interface {l.interface} has public address that cannot be assigned')
-                    
+                await aws_link_handle_eip(self, l)
             
 
     @setup_task("Create VM", order=AwsManaged.find_or_create.order)

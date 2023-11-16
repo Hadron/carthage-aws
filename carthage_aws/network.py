@@ -16,6 +16,7 @@ from carthage.dependency_injection import *
 from carthage.network import TechnologySpecificNetwork, this_network
 from carthage.config import ConfigLayout
 from carthage.modeling import NetworkModel, InjectableModel, provides
+from carthage.modeling.implementation import ModelingContainer
 from carthage.utils import when_needed
 import carthage.machine
 
@@ -29,7 +30,7 @@ __all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet', 'AwsSecurityGroup',
 
 
 @inject_autokwargs()
-class AwsVirtualPrivateCloud(AwsManaged):
+class AwsVirtualPrivateCloud(AwsManaged, InjectableModel, metaclass=ModelingContainer):
 
     stamp_type = "vpc"
     resource_type = 'vpc'
@@ -477,6 +478,8 @@ class AwsRouteTable(AwsManaged):
         if kind is None:
             if isinstance(target, AwsInternetGateway):
                 kind = 'Gateway'
+            elif isinstance(target, AwsNatGateway):
+                kind = 'NatGateway'
             elif target.__class__.__name__ == 'AwsVpcEndpoint':
                 kind = 'VpcEndpoint'
             elif isinstance(target, AwsTransitGateway):
@@ -613,3 +616,101 @@ class AwsInternetGateway(AwsManaged):
             self.attachment_id = None
 
 __all__ += ['AwsInternetGateway']
+
+async def aws_link_handle_eip(model, link):
+    if link.merged_v4_config.public_address:
+        try:
+            vpc_address = await model.ainjector(VpcAddress, ip_address=str(link.merged_v4_config.public_address))
+            link.vpc_address_allocation = vpc_address.id
+        except LookupError:
+            logger.warning(f'{model} interface {link.interface} has public address that cannot be assigned')
+
+@inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud),
+                   )
+class AwsNatGateway(AwsManaged, carthage.machine.NetworkedModel, InjectableModel):
+
+    '''
+    Represents a AWS NAT Gateway.
+    If the connectivity_type is public (the default), AWS requires an EIP (a :class:`VpcAddress`) to be allocated.
+    Do this either by:
+
+    * Setting public_address on the v4_config of the link
+
+    * set vpc_address_allocation to an allocation ID on the link
+
+    * Or as a default operation, the injector associated with the NatGateway can directly provide VpcAddress.  This class provides such a default.
+
+    '''
+    
+    stamp_type ='nat_gateway'
+    resource_type = 'natgateway'
+
+    connectivity_type = 'public' #: public or private
+
+    def __init__(self, connectivity_type=None, **kwargs):
+        super().__init__(**kwargs)
+        self.network_links = {}
+        if connectivity_type: self.connectivity_type = connectivity_type
+        if self.connectivity_type == 'public' and VpcAddress not in self.injector:
+            self.injector.add_provider(InjectionKey(VpcAddress),
+                                       when_needed(VpcAddress, name=self.name+ 'address'))
+            
+        
+    def find_from_id(self):
+        try:
+            r = self.connection.client.describe_nat_gateways(NatGatewayIds=[self.id])
+        except ClientError: return
+        gateways = r['NatGateways']
+        if len(gateways) > 0:
+            self.mob = gateways[0]
+
+    async def pre_create_hook(self):
+        # Note this hook is also called in delete to populate
+        # self.link; if that becomes inappropriate, then split
+        # functionality.
+        await self.resolve_networking()
+        if not len(self.network_links) > 0:
+            raise ValueError('At least one link required')
+        link = next(iter(self.network_links.values()))
+        await link.instantiate(AwsSubnet)
+        await aws_link_handle_eip(self, link)
+        if self.connectivity_type == 'public' and not hasattr(link, 'vpc_address_allocation'):
+            if InjectionKey(VpcAddress) in self.injector:
+                vpc_address = await self.ainjector.get_instance_async(VpcAddress)
+                link.vpc_address_allocation = vpc_address.id
+            else:
+                raise ValueError('AwsNatGateway must either be connectivity_type private, or have a VpcAddress either as the public_address of the link, or directly in the injector of the nat gateway.')
+        self.subnet = link.net_instance
+        self.link = link
+
+    def do_create(self):
+        extras = {}
+        if self.connectivity_type == 'public':
+            extras['AllocationId'] = self.link.vpc_address_allocation
+        if self.link.merged_v4_config.address:
+            extras['PrivateIpAddress'] = str(self.link.merged_v4_config.address)
+        r = self.connection.client.create_nat_gateway(
+            ConnectivityType=self.connectivity_type,
+            SubnetId=self.subnet.id,
+            TagSpecifications=[self.resource_tags],
+            **extras)
+        self.id = r['NatGateway']['NatGatewayId']
+
+    async def delete(self, delete_vpc_address=None):
+        def callback():
+            self.connection.client.delete_nat_gateway(
+                NatGatewayId=self.id)
+        await self.find()
+        if not self.mob: return
+        await run_in_executor(callback)
+        if delete_vpc_address is None:
+            await self.pre_create_hook()
+            delete_vpc_address = not self.link.merged_v4_config.public_address
+        if self.connectivity_type == 'public' and delete_vpc_address:
+            vpc_address = getattr(self.link, 'vpc_address', None)
+            if not vpc_address:
+                vpc_address = await self.ainjector.get_instance_async(InjectionKey(VpcAddress, _ready=False))
+            await vpc_address.find()
+            if vpc_address.mob: await vpc_address.delete()
+
+__all__ += ['AwsNatGateway']

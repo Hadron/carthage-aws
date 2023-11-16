@@ -32,7 +32,7 @@ resource_factory_methods = dict(
     security_group='SecurityGroup',
     route_table='RouteTable',
     internet_gateway='InternetGateway',
-    
+    natgateway='error', # There is no service resource
 )
 
 async def run_in_executor(func, *args):
