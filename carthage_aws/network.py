@@ -273,7 +273,7 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
             lambda permission:SgRule.from_ip_permission(permission),
             self.mob.ip_permissions))
 
-    async def post_find_hook(self):
+    async def read_write_hook(self):
         def callback():
             existing_egress = self.existing_egress
             existing_ingress = self.existing_ingress
@@ -604,7 +604,7 @@ class AwsInternetGateway(AwsManaged):
         )
         self.id = r['InternetGateway']['InternetGatewayId']
 
-    async def post_find_hook(self): 
+    async def read_write_hook(self): 
         if self.vpc: await self.vpc.async_become_ready()
         await self.attach(self.vpc)
         if len(getattr(self.mob, 'attachments', [])) > 0:

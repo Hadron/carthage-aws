@@ -245,6 +245,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         await self.find()
 
         if self.mob:
+            if not self.readonly: await self.ainjector(self.read_write_hook)
             await self.ainjector(self.post_find_hook)
             return
 
@@ -265,6 +266,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             self.id = self.mob.id
 
         await self.ainjector(self.post_create_hook)
+        await self.ainjector(self.read_write_hook)
         await self.ainjector(self.post_find_hook)
         return self.mob
 
@@ -272,6 +274,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
     async def find_or_create(self):
         await self.find()
         if self.mob:
+            if not self.readonly: await self.ainjector(self.read_write_hook)
             await self.ainjector(self.post_find_hook)
             return True
         return False
@@ -298,10 +301,15 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         pass
 
     async def post_find_hook(self):
-        '''Any tasks performed in async context after an object is found or created.  May have injected dependencies.  If you need to perform tasks before find, simply override :meth:`find`'''
+        '''Any tasks performed in async context after an object is found or created.  May have injected dependencies.  If you need to perform tasks before find, simply override :meth:`find`.  This hook MUST NOT modify the object if self.readonly is True.  In general, any tasks that may modify the object should be run in :meth:`read_write_hook` which runs before *post_find_hook*.'''
         pass
     
-
+    async def read_write_hook(self):
+        '''
+        A hook for performing tasks that may modify the state of an object such as reconciling expected configuration with actual configuration.  Called before :meth:`post_find_hook` when an object is found or created, but only when *readonly* is not true.
+        '''
+        pass
+    
 
     @memoproperty
     def stamp_path(self):
