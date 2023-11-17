@@ -319,3 +319,32 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         return p
 
 
+
+async def wait_for_state_change(obj, get_state_func, desired_state:str, wait_states: list[str]):
+    '''
+    Wait for a state transition, generally for objects without a boto3 resource implementation.  So *get_state_func* typically decomposes whatever :meth:``find_from_id` puts in *mob*.
+
+    :param obj: An :class:`AwsManaged` implementing *find_from_id* which we will use as a reload function.
+
+    :param get_state_func: A function to get the current state from *mob*, possibly something like `lambda obj:obj.mob['State']`
+
+    :param desired_state: The state that counts as success.
+
+    :param wait_states:  If one of these states persists, then continue to wait.
+
+    '''
+    timeout = 90 # Turn this into a parameter if we need to adjust.
+    state = get_state_func(obj)
+    if state == desired_state: return
+    logged = False
+    while timeout > 0:
+        if state not in wait_states:
+            raise RuntimeError(f'Unexpected state for {obj}: {state}')
+        if not logged:
+            logger.info(f'Waiting for {obj} to enter {desired_state} state')
+            logged=True
+        await asyncio.sleep(5)
+        timeout -= 5
+        await run_in_executor(obj.find_from_id)
+        state = get_state_func(obj)
+        

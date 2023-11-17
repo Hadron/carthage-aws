@@ -13,6 +13,7 @@ from carthage import *
 from carthage_aws import *
 from carthage.modeling import *
 from carthage.pytest import *
+from carthage.network import this_network
 
 @async_test
 async def test_base_vm(carthage_layout):
@@ -139,12 +140,29 @@ async def test_aws_subnet_create(ainjector):
             name = 'test_igw'
 
 
+        @provides(InjectionKey(Network, role='public'))
         class created_subnet(NetworkModel):
             v4_config = V4Config(network='10.1.0.0/24')
             aws_availability_zone = 'us-east-1c'
+            @propagate_up()
+            @globally_unique_key("nat_gw")
+            class nat_gw(AwsNatGateway):
+                name = "test_nat_gw"
+
+                class net_config(NetworkConfigModel):
+                    add('eth0', mac=None, net=this_network)
+        class private_subnet(NetworkModel):
+            v4_config = V4Config(network='10.1.1.0/24')
+            aws_availability_zone = 'us-east-1d'
+            class route_table(AwsRouteTable):
+                name = 'test_private_route_table'
+                routes = [
+                    ('0.0.0.0/0', InjectionKey("nat_gw")),
+                    ]
     try:
         ainjector.add_provider(creation_vpc)
         vpc = None
+        private_subnet = None
         vpc = await ainjector.get_instance_async(creation_vpc)
         with instantiation_not_ready():
             subnet = await vpc.created_subnet.access_by(AwsSubnet)
@@ -153,6 +171,15 @@ async def test_aws_subnet_create(ainjector):
         await subnet.async_become_ready()
         assert subnet.mob
         assert subnet.mob.availability_zone == subnet._gfi("aws_availability_zone")
+        with TestTiming(300):
+            private_subnet = await vpc.private_subnet.access_by(AwsSubnet)
     finally:
+        try:
+            nat_gw = await vpc.ainjector.get_instance_async(InjectionKey('nat_gw', _ready=False))
+            await nat_gw.delete()
+            await asyncio.sleep(5)
+        except Exception: logger.exception('error deleting nat GW')
+        #if private_subnet:
+            #await private_subnet.delete()
         if vpc: await vpc.delete()
         

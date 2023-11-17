@@ -20,7 +20,7 @@ from carthage.modeling.implementation import ModelingContainer
 from carthage.utils import when_needed
 import carthage.machine
 
-from .connection import AwsConnection, AwsManaged, run_in_executor
+from .connection import AwsConnection, AwsManaged, run_in_executor, wait_for_state_change
 
 import boto3
 from botocore.exceptions import ClientError
@@ -471,6 +471,11 @@ class AwsRouteTable(AwsManaged):
     stamp_type = "route_table"
     resource_type = "route_table"
 
+    #: A list or tuple of routes (destination, target, kind) to
+    #install.  If set, then whenever this changes, all routes besides
+    #the local route are deleted and these routes are installed.
+    routes:typing.Sequence = tuple()
+
     def _add_route(self, destination, target, kind=None):
 
         from .transit import AwsTransitGateway
@@ -496,12 +501,12 @@ class AwsRouteTable(AwsManaged):
         try:
             r = self.mob.create_route(**kwargs)
         except ClientError as e:
-            logger.error(f'Could not create route {net}->{target} due to {e}.')
+            logger.error(f'Could not create route {destination}->{target} due to {e}.')
 
-    async def add_route(self, destination, target, kind, exists_ok=False):
-        destination = await resolve_deferred(ainjector, destination, args=dict(target=target, kind=kind))
+    async def add_route(self, destination, target, kind=None, exists_ok=False):
+        destination = await resolve_deferred(self.ainjector, destination, args=dict(target=target, kind=kind))
         target = await resolve_deferred(self.ainjector, target, args=dict(destination=destination, kind=kind))
-        await run_in_executor(self._add_route, destination, target, kind=kind)
+        await run_in_executor(self._add_route, destination, target, kind)
 
     async def associate_subnet(self, subnet):
         def callback():
@@ -540,6 +545,18 @@ class AwsRouteTable(AwsManaged):
         except ClientError as e:
             logger.error(f'Could not create AwsRouteTable {self.name} due to {e}.')
 
+    @setup_task("Configure routes")
+    async def configure_routes(self):
+        if self.readonly: raise SkipSetupTask
+        if not self.routes: raise SkipSetupTask
+        # This is a separate setup task so that we can turn it off in
+        # subclasses and so that we can have a hash
+        await self.set_routes(*self.routes)
+
+    @configure_routes.hash()
+    def configure_routes(self):
+        return repr(self.routes)
+    
 inject(route_table=InjectionKey(AwsRouteTable, _optional=NotPresent))(AwsSubnet)
 
 __all__ += ['AwsRouteTable']
@@ -661,8 +678,13 @@ class AwsNatGateway(AwsManaged, carthage.machine.NetworkedModel, InjectableModel
             r = self.connection.client.describe_nat_gateways(NatGatewayIds=[self.id])
         except ClientError: return
         gateways = r['NatGateways']
-        if len(gateways) > 0:
-            self.mob = gateways[0]
+        for g in gateways:
+            if g['State'] == 'deleted':
+                self.connection.invalid_ec2_resource(self.resource_type, g['NatGatewayId'])
+                continue
+            self.mob = g
+            break
+
 
     async def pre_create_hook(self):
         # Note this hook is also called in delete to populate
@@ -696,21 +718,40 @@ class AwsNatGateway(AwsManaged, carthage.machine.NetworkedModel, InjectableModel
             **extras)
         self.id = r['NatGateway']['NatGatewayId']
 
+    async def post_find_hook(self):
+        try: await wait_for_state_change(
+                self, lambda obj: obj.mob['State'],
+                'available', ['pending'])
+        finally:
+            if self.mob['State'] == 'failed':
+                logger.error(f'{self} failed: {self.mob["FailureMessage"]}')
+                if not self.readonly:
+                    logger.info(f'Deleting failed NAT gateway {self}')
+                    await self.delete()
+                    raise RuntimeError(f'{self} failed: {self.mob["FailureMessage"]}')
+
     async def delete(self, delete_vpc_address=None):
         def callback():
             self.connection.client.delete_nat_gateway(
                 NatGatewayId=self.id)
         await self.find()
         if not self.mob: return
+        logger.info('Deleting NAT Gateway %s', self.id)
         await run_in_executor(callback)
+        await wait_for_state_change(
+            self, lambda obj: obj.mob['State'],
+            'deleted', ['available', 'pending', 'deleting'])
         if delete_vpc_address is None:
             await self.pre_create_hook()
             delete_vpc_address = not self.link.merged_v4_config.public_address
         if self.connectivity_type == 'public' and delete_vpc_address:
-            vpc_address = getattr(self.link, 'vpc_address', None)
-            if not vpc_address:
-                vpc_address = await self.ainjector.get_instance_async(InjectionKey(VpcAddress, _ready=False))
-            await vpc_address.find()
-            if vpc_address.mob: await vpc_address.delete()
+            try:
+                vpc_address = getattr(self.link, 'vpc_address', None)
+                if not vpc_address:
+                    vpc_address = await self.ainjector.get_instance_async(InjectionKey(VpcAddress, _ready=False))
+                    await vpc_address.find()
+                if vpc_address.mob: await vpc_address.delete()
+            except Exception as e:
+                logger.exception(f'Deleting VPCAddress for {self}')
 
 __all__ += ['AwsNatGateway']
