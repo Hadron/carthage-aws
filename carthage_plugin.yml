@@ -1,5 +1,8 @@
 name: carthage_aws
 package: carthage_aws
+dependencies:
+  - deb: python3-boto3
+    pypi: boto3
 python: .
 config:
   plugins:
