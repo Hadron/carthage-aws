@@ -368,7 +368,7 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
         except ClientError as e:
             raise RuntimeError(f'unable to create AWS subnet for {self}: {e}')
 
-    async def post_create_hook(self):
+    async def read_write_hook(self):
         if self.route_table:
             await self.route_table.async_become_ready()
             await self.route_table.associate_subnet(self)
