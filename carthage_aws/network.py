@@ -15,8 +15,7 @@ from carthage import *
 from carthage.dependency_injection import *
 from carthage.network import TechnologySpecificNetwork, this_network
 from carthage.config import ConfigLayout
-from carthage.modeling import NetworkModel, InjectableModel, provides
-from carthage.modeling.implementation import ModelingContainer
+from carthage.modeling import NetworkModel, InjectableModel, ModelContainer, provides
 from carthage.utils import when_needed
 import carthage.machine
 
@@ -30,7 +29,7 @@ __all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet', 'AwsSecurityGroup',
 
 
 @inject_autokwargs()
-class AwsVirtualPrivateCloud(AwsManaged, InjectableModel, metaclass=ModelingContainer):
+class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
 
     stamp_type = "vpc"
     resource_type = 'vpc'
