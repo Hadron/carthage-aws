@@ -100,7 +100,7 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
             async def install_software(self):
                 await self.ssh("apt -y install python3-pip rsync python3-pytest python3-netifaces ansible",
                                _bg=True, _bg_exc=False)
-                await self.ssh("pip3 install boto3", _bg=True, _bg_exc=False)
+                await self.ssh("apt -y install python3-boto3", _bg=True, _bg_exc=False)
                 await self.ssh('systemctl enable --now systemd-resolved', _bg=True, _bg_exc=False)
 
             install_mako = install_mako_task('model')
