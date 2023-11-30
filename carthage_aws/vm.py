@@ -65,7 +65,7 @@ async def generate_block_device_mappings(connection, ami, model, volume_type):
 
 
 @inject(ainjector=AsyncInjector)
-async def find_security_groups(l:NetworkLink, vpc_groups, *, ainjector):
+async def find_security_groups(l:NetworkLink,  *, ainjector):
     desired_groups = getattr(l, 'aws_security_groups', None)
     if desired_groups is None:
         desired_groups = getattr(l.net, 'aws_security_groups', None)
@@ -73,9 +73,14 @@ async def find_security_groups(l:NetworkLink, vpc_groups, *, ainjector):
             desired_groups = l.net.injector.get_instance(InjectionKey('aws_security_groups', _optional=True))
     if desired_groups is None:
         desired_groups = ['default']
+    
+    if isinstance(desired_groups, str):
+        raise ValueError(f"`{desired_groups}` is not a valid value for desired_groups. It must be an iterable of strings and not of type str.")
+
     groups = {g['GroupName']:g['GroupId'] for g in l.net_instance.vpc.groups}
     results = []
     for g in desired_groups:
+        assert isinstance(g, str), f"Items in desired_groups must be a string. Got {g!r} instead."
         g_obj = await l.net.ainjector.get_instance_async(InjectionKey(AwsSecurityGroup, name=g, _optional=True))
         if not g_obj:
             g_obj = await ainjector.get_instance_async(InjectionKey(AwsSecurityGroup, name=g, _optional=True))
@@ -88,8 +93,7 @@ async def find_security_groups(l:NetworkLink, vpc_groups, *, ainjector):
 
         
 
-@inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True),
-                   )
+@inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True))
 class AwsVm(AwsManaged, Machine):
 
     pass_name_to_super = True
@@ -174,9 +178,9 @@ class AwsVm(AwsManaged, Machine):
             self.block_device_mappings = await self.ainjector(generate_block_device_mappings)
         else: self.block_device_mappings = None
         for l in self.network_links.values():
-            if l.local_type: continue
-            l.security_group_ids = await self.ainjector(
-                find_security_groups, l, l.net_instance.vpc.groups)
+            if l.local_type: 
+                continue
+            l.security_group_ids = await self.ainjector(find_security_groups, l)
             if l.merged_v4_config.public_address:
                 await aws_link_handle_eip(self, l)
             
