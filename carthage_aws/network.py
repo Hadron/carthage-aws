@@ -331,12 +331,12 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
 
     stamp_type = "subnet"
     resource_type = 'subnet'
+    resource_factory_method = 'Subnet'
 
     route_table:AwsRouteTable = None #: Route table to associate
     
     def __init__(self,  **kwargs):
         super().__init__( **kwargs)
-        self.groups = self.vpc.groups
         self.name = self.network.name
 
 
