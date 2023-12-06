@@ -62,6 +62,8 @@ def enable_new_aws_connection(injector):
 
 @inject(injector=Injector)
 def carthage_plugin(injector):
+    from . import connection
+    injector.add_provider(connection.AwsDeployableFinder)
     injector.add_provider(AwsVirtualPrivateCloud)
     injector.add_provider(AwsSubnet, allow_multiple = True)
     injector(enable_new_aws_connection)

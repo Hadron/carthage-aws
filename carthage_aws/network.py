@@ -33,6 +33,7 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
 
     stamp_type = "vpc"
     resource_type = 'vpc'
+    resource_factory_method = 'Vpc'
 
     vpc_cidr:str = None #: String representation of the v4 CIDR block for the VPC
 
@@ -211,6 +212,7 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
 
     stamp_type = "security-group"
     resource_type = "security_group"
+    resource_factory_method='SecurityGroup'
 
     def __init__(self,  **kwargs):
         if 'description' in kwargs:
@@ -377,6 +379,8 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
 class VpcAddress(AwsManaged):
 
     resource_type = 'elastic_ip'
+    resource_factory_method = 'VpcAddress'
+
     stamp_type = 'elastic_ip'
     ip_address = None
 
@@ -469,6 +473,7 @@ class AwsRouteTable(AwsManaged):
 
     stamp_type = "route_table"
     resource_type = "route_table"
+    resource_factory_method = 'RouteTable'
 
     #: A list or tuple of routes (destination, target, kind) to
     #install.  If set, then whenever this changes, all routes besides
@@ -567,6 +572,7 @@ class AwsInternetGateway(AwsManaged):
                 
     stamp_type = "internet_gateway"
     resource_type = "internet_gateway"
+    resource_factory_method = 'InternetGateway'
 
     vpc:AwsVirtualPrivateCloud = None
 
@@ -660,6 +666,7 @@ class AwsNatGateway(AwsManaged, carthage.machine.NetworkedModel, InjectableModel
     
     stamp_type ='nat_gateway'
     resource_type = 'natgateway'
+    resource_factory_method = NotImplemented
 
     connectivity_type = 'public' #: public or private
 
@@ -669,8 +676,12 @@ class AwsNatGateway(AwsManaged, carthage.machine.NetworkedModel, InjectableModel
         if connectivity_type: self.connectivity_type = connectivity_type
         if self.connectivity_type == 'public' and VpcAddress not in self.injector:
             self.injector.add_provider(InjectionKey(VpcAddress),
-                                       when_needed(VpcAddress, name=self.name+ 'address'))
-            
+                                       when_needed(VpcAddress, name=self.name+ ' address'))
+
+    async def  sub_deployables(self):
+        if VpcAddress in self.injector:
+            return [InjectionKey(VpcAddress)]
+        return []
         
     def find_from_id(self):
         try:

@@ -313,6 +313,7 @@ class AwsVm(AwsManaged, Machine):
     
     stamp_type = 'vm'
     resource_type = 'instance'
+    resource_factory_method = 'Instance'
 
 @inject()
 class  LocalAwsVm(LocalMachineMixin, AwsVm): pass

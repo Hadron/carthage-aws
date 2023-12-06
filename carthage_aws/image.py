@@ -61,6 +61,7 @@ __all__ += ['debian_ami_owner']
 
 class AwsImage(AwsManaged):
     resource_type = 'image'
+    resource_factory_method = 'Image'
     readonly = True
 
     async def possible_ids_for_name(self):

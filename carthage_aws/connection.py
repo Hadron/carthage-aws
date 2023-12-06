@@ -12,28 +12,19 @@ import functools
 import logging
 import os
 
+import carthage.network
 from carthage import *
 from carthage.config import ConfigLayout
 from carthage.dependency_injection import *
-
+from carthage.modeling import propagate_key
 import boto3
 from botocore.exceptions import ClientError
 
+#: Mapping of resource_types to classes that implement them
+aws_type_registry: dict[str,'AwsManaged'] = {}
+
 __all__ = ['AwsConnection', 'AwsManaged']
 
-resource_factory_methods = dict(
-    instance='Instance',
-    vpc='Vpc',
-    elastic_ip='VpcAddress',
-    subnet='Subnet',
-    snapshot='Snapshot',
-    volume='Volume',
-    image='Image',
-    security_group='SecurityGroup',
-    route_table='RouteTable',
-    internet_gateway='InternetGateway',
-    natgateway='error', # There is no service resource
-)
 
 async def run_in_executor(func, *args):
     return await asyncio.get_event_loop().run_in_executor(None, func, *args)
@@ -70,14 +61,9 @@ class AwsConnection(AsyncInjectable):
     def _inventory(self):
         # Executor context
         self.names_by_resource_type = {}
-        for rt in resource_factory_methods:
-            self.names_by_resource_type[rt] = {}
-            nbrt = self.names_by_resource_type
+        nbrt = self.names_by_resource_type
         r = self.client.describe_tags(Filters=[dict(Name='key', Values=['Name'])])
         for resource in r['Tags']:
-            # This setdefault should be unnecessary but is defensive
-            # in case someone has tagged a resource we do not normally
-            # manage with a Name.
             rt, rv = resource['ResourceType'], resource['Value']
             rt = rt.replace('-','_')
             nbrt.setdefault(rt, {})
@@ -186,7 +172,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
     def find_from_id(self):
         #called in executor context; create a mob from id
         assert self.id
-        resource_factory = getattr(self.service_resource, resource_factory_methods[self.resource_type])
+        resource_factory = getattr(self.service_resource, self.resource_factory_method)
         self.mob = resource_factory(self.id)
         try:
             self.mob.load()
@@ -318,6 +304,41 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         os.makedirs(p, exist_ok=True)
         return p
 
+    def aws_propagate_key(cls):
+        '''
+        Returns an :class:`InjectionKey`  that will :func:`propagate up <carthage.modeling.propagate_key>` so that :mod:`deployment <carthage.deployment>` can find the deployable.
+
+        Note that this method is sometimes called as if it were a class method although it must not be declared as such.  That is, sometimes *cls* is a class and sometimes an instance:
+
+        * called  as ``cls.aws_propagate_key(cls)`` in :meth:`default_class_injection_key` and :meth:`__init_subclass__`.
+
+        * called with an instance in :meth:`default_instance_injection_key`.
+
+        This method can raise *AttributeError* if it is unable to determine the key to propagate, for example if ``cls.name`` is None.
+        This method should be overridden in subclasses if the default is not correct.
+        '''
+        if cls.name is None: raise AttributeError('Name not yet set')
+        constraint = {cls.resource_type+'_name':cls.name}
+        target = aws_type_registry[cls.resource_type]
+        return InjectionKey(target, **constraint)
+
+    @classmethod
+    def default_class_injection_key(cls):
+        try: return cls.aws_propagate_key(cls)
+        except AttributeError:
+            return super().default_class_injection_key()
+
+    def  default_instance_injection_key(self):
+        return self.aws_propagate_key()
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls.resource_type not in aws_type_registry:
+            aws_type_registry[cls.resource_type] = cls
+        try:
+            propagate_key(cls.aws_propagate_key(cls), cls)
+        except AttributeError: pass
+        
 
 
 async def wait_for_state_change(obj, get_state_func, desired_state:str, wait_states: list[str]):
@@ -348,3 +369,28 @@ async def wait_for_state_change(obj, get_state_func, desired_state:str, wait_sta
         await run_in_executor(obj.find_from_id)
         state = get_state_func(obj)
         
+class AwsDeployableFinder(DeployableFinder):
+
+    '''
+    Find any :class:`AwsManaged`.  Also, for any VPC, explicitly instantiate any networks contained within the VPC as an AwsSubnet.
+    '''
+
+    name = 'aws'
+
+    
+    async def find(self, ainjector):
+        from .network import AwsVirtualPrivateCloud, AwsSubnet
+        subnets = []
+        results = await ainjector.filter_instantiate_async(
+            None, lambda k: isinstance(k.target, type) and issubclass(k.target, AwsManaged),
+            ready=False, stop_at=ainjector)
+        for _, obj in results:
+            if isinstance(obj,AwsVirtualPrivateCloud):
+                networks = await obj.ainjector.filter_instantiate_async(
+                    None,
+                    lambda k: isinstance(k.target, type) and issubclass(k.target, carthage.Network),
+                    stop_at=obj.ainjector,
+                    ready=False)
+                for _, network in networks:
+                    subnets.append(await network.access_by(AwsSubnet, ready=False))
+        return subnets + [x[1] for x in results]
