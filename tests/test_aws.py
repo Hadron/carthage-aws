@@ -144,8 +144,7 @@ async def test_aws_subnet_create(ainjector):
         class created_subnet(NetworkModel):
             v4_config = V4Config(network='10.1.0.0/24')
             aws_availability_zone = 'us-east-1c'
-            @propagate_up()
-            @globally_unique_key("nat_gw")
+            @propagate_key(InjectionKey("nat_gw", _globally_unique=True))
             class nat_gw(AwsNatGateway):
                 name = "test_nat_gw"
 
