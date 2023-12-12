@@ -14,7 +14,7 @@ from ipaddress import IPv4Address
 from carthage import *
 from carthage.modeling import *
 from carthage.dependency_injection import *
-from carthage.machine import Machine
+from carthage.machine import Machine, NetworkedModel
 from carthage.network import NetworkConfig, NetworkLink
 from carthage.local import LocalMachineMixin
 from carthage.cloud_init import generate_cloud_init_cloud_config
@@ -257,7 +257,10 @@ class AwsVm(AwsManaged, Machine):
     async def post_find_hook(self):
         await self.is_machine_running()
         return await super().post_find_hook()
-    
+
+    async def dynamic_dependencies(self):
+        return await NetworkedModel.dynamic_dependencies(self)
+
     async def start_machine(self):
         async with self._operation_lock:
             await self.is_machine_running()
@@ -335,3 +338,4 @@ __all__ += ['MaybeLocalAwsVm']
 
 # At the end so that network can inject an AwsVm
 from .network import  AwsSubnet, AwsSecurityGroup, VpcAddress
+AwsVm.network_implementation_class = AwsSubnet
