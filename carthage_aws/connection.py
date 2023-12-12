@@ -206,7 +206,8 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
 
     async def possible_ids_for_name(self):
         resource_type = self.resource_type
-        names = self.connection.names_by_resource_type[resource_type]
+        try: names = self.connection.names_by_resource_type[resource_type]
+        except KeyError: return []
         if self.name in names:
             objs = names[self.name]
             return [obj['ResourceId'] for obj in objs]
