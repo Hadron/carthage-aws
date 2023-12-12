@@ -304,6 +304,11 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         os.makedirs(p, exist_ok=True)
         return p
 
+    async def dynamic_dependencies(self):
+        # for Deployable interface
+        return []
+    
+
     def aws_propagate_key(cls):
         '''
         Returns an :class:`InjectionKey`  that will :func:`propagate up <carthage.modeling.propagate_key>` so that :mod:`deployment <carthage.deployment>` can find the deployable.
@@ -381,8 +386,11 @@ class AwsDeployableFinder(DeployableFinder):
     async def find(self, ainjector):
         from .network import AwsVirtualPrivateCloud, AwsSubnet
         subnets = []
+        # Instantiating allow_multiple keys like AwsSubnet with
+        # filter_instantiate almost certainly leads to Deployable
+        # duplication, so don't.
         results = await ainjector.filter_instantiate_async(
-            None, lambda k: isinstance(k.target, type) and issubclass(k.target, AwsManaged),
+            None, lambda k: isinstance(k.target, type) and issubclass(k.target, AwsManaged) and not issubclass(k.target, AwsSubnet),
             ready=False, stop_at=ainjector)
         for _, obj in results:
             if isinstance(obj,AwsVirtualPrivateCloud):

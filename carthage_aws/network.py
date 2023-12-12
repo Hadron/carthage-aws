@@ -15,7 +15,7 @@ from carthage import *
 from carthage.dependency_injection import *
 from carthage.network import TechnologySpecificNetwork, this_network
 from carthage.config import ConfigLayout
-from carthage.modeling import NetworkModel, InjectableModel, ModelContainer, provides
+from carthage.modeling import NetworkModel, InjectableModel, ModelContainer, provides, no_inject_name
 from carthage.utils import when_needed
 import carthage.machine
 
@@ -328,7 +328,7 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
 # Decorated also with injection for route table after it is defined.
 @inject_autokwargs(connection = InjectionKey(AwsConnection, _ready=True),
                    network=this_network,
-                   vpc=InjectionKey(AwsVirtualPrivateCloud, _ready=True))
+                   vpc=InjectionKey(AwsVirtualPrivateCloud))
 class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
 
     stamp_type = "subnet"
@@ -340,7 +340,6 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
     def __init__(self,  **kwargs):
         super().__init__( **kwargs)
         self.name = self.network.name
-
 
 
     async def find(self):
@@ -560,7 +559,20 @@ class AwsRouteTable(AwsManaged):
     @configure_routes.hash()
     def configure_routes(self):
         return repr(self.routes)
+
+    async def dynamic_dependencies(self):
+        '''
+        See :func:`carthage.deployment.Deployable.dynamic_dependencies` for documentation.
+        Returns dependencies for any routes
+        '''
+        results = []
+        with instantiation_not_ready():
+            for destination, target, *rest in self.routes:
+                target = await resolve_deferred(self.ainjector, target, args=dict(destination=destination, kind=rest[0] if len(rest) else None))
+                results.append(target)
+        return results
     
+
 inject(route_table=InjectionKey(AwsRouteTable, _optional=NotPresent))(AwsSubnet)
 
 __all__ += ['AwsRouteTable']
@@ -649,7 +661,7 @@ async def aws_link_handle_eip(model, link):
 
 @inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud),
                    )
-class AwsNatGateway(AwsManaged, carthage.machine.NetworkedModel, InjectableModel):
+class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel):
 
     '''
     Represents a AWS NAT Gateway.
@@ -667,6 +679,7 @@ class AwsNatGateway(AwsManaged, carthage.machine.NetworkedModel, InjectableModel
     stamp_type ='nat_gateway'
     resource_type = 'natgateway'
     resource_factory_method = NotImplemented
+    network_implementation_class = no_inject_name(AwsSubnet)
 
     connectivity_type = 'public' #: public or private
 
@@ -678,10 +691,12 @@ class AwsNatGateway(AwsManaged, carthage.machine.NetworkedModel, InjectableModel
             self.injector.add_provider(InjectionKey(VpcAddress),
                                        when_needed(VpcAddress, name=self.name+ ' address'))
 
-    async def  sub_deployables(self):
+    async def  dynamic_dependencies(self):
+        results = await super().dynamic_dependencies()
         if VpcAddress in self.injector:
-            return [InjectionKey(VpcAddress)]
-        return []
+            results.append(await self.ainjector.get_instance_async(
+                InjectionKey(VpcAddress, _ready=False)))
+        return results
         
     def find_from_id(self):
         try:
