@@ -44,6 +44,12 @@ class AwsHostedZone(AwsManaged, DnsZone):
     def service_resource(self):
         return self.connection.connection.client('route53', region_name=self.connection.region)
 
+    def aws_propagate_key(cls):
+        # We need to define this ourselves because we do not set
+        # resource_type
+        if not cls.name: raise AttributeError('name not yet set')
+        return InjectionKey(AwsHostedZone, zone_name=cls.name)
+    
 
     def find_from_name(self):
         try:
