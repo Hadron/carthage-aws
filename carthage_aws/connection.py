@@ -372,11 +372,11 @@ async def wait_for_state_change(obj, get_state_func, desired_state:str, wait_sta
     :param wait_states:  If one of these states persists, then continue to wait.
 
     '''
-    timeout = 90 # Turn this into a parameter if we need to adjust.
+    timeout = 300 # Turn this into a parameter if we need to adjust.
     state = get_state_func(obj)
-    if state == desired_state: return
     logged = False
     while timeout > 0:
+        if state == desired_state: return
         if state not in wait_states:
             raise RuntimeError(f'Unexpected state for {obj}: {state}')
         if not logged:
@@ -386,6 +386,7 @@ async def wait_for_state_change(obj, get_state_func, desired_state:str, wait_sta
         timeout -= 5
         await run_in_executor(obj.find_from_id)
         state = get_state_func(obj)
+    raise RuntimeError(f'{obj}: {state=} is not desired state {desired_state}')
         
 class AwsDeployableFinder(DeployableFinder):
 
