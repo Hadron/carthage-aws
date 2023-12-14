@@ -219,6 +219,18 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         else:
             return f'<anonymous {self.__class__.__name__} at 0x{id(self):0x}>'
 
+    def __str__(self):
+        try:
+            result = self.resource_type+':'
+            if self.name:
+                result += self.name
+            elif self.id:
+                result += self.id
+            return result
+        except Exception:
+            return super().__str__()
+    
+            
     @setup_task("construct", order=700)
     async def find_or_create(self):
 
