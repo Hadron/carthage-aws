@@ -259,7 +259,15 @@ class AwsVm(AwsManaged, Machine):
         return await super().post_find_hook()
 
     async def dynamic_dependencies(self):
-        return await NetworkedModel.dynamic_dependencies(self)
+        result =  await NetworkedModel.dynamic_dependencies(self)
+        # In addition to the AwsSubnets, we need to depend on any
+        # security group we use.  It turns out calculating that is
+        # harder than I want to spend time on, so as a stop-gap depend
+        # on all security groups.
+        result.extend(self.injector.filter(AwsSecurityGroup, ['name']))
+        return result
+        
+        
 
     async def start_machine(self):
         async with self._operation_lock:
@@ -302,6 +310,7 @@ class AwsVm(AwsManaged, Machine):
 
     async def delete(self):
         await run_in_executor(self.mob.terminate)
+        await run_in_executor(self.mob.wait_until_terminated)
 
     async def root_device_and_volume(self):
         ''':returns: tuple of root device and volume'''
