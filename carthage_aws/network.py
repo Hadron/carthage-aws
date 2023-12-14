@@ -315,6 +315,10 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
             for g in self.vpc.groups:
                 if g['GroupName'] == self.name: results.append(g['GroupId'])
             return results
+        # Make sure the vpc is instantiated
+        # If it does not exist, then we cannot possibly exist
+        if not self.vpc.id: await self.vpc.find()
+        if not self.vpc.id: return []
         return await run_in_executor(callback)
 
     @property
@@ -341,6 +345,9 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
         super().__init__( **kwargs)
         self.name = self.network.name
 
+    def __str__(self):
+        return f'AwsSubnet:{self.name} ({self.network.v4_config.network})'
+    
 
     async def find(self):
         await self.vpc.async_become_ready()
@@ -373,6 +380,12 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
             await self.route_table.async_become_ready()
             await self.route_table.associate_subnet(self)
 
+    async def delete(self):
+        await self.find()
+        if not self.mob: return
+        logger.info('Deleting %s', self)
+        await run_in_executor(self.mob.delete)
+        
 @inject_autokwargs(
     ip_address = InjectionKey('ip_address', _optional=NotPresent))
 class VpcAddress(AwsManaged):
@@ -465,7 +478,7 @@ async def network_for_existing_vm(vm, security_groups):
 
 __all__ += ['network_for_existing_vm']
 
-@inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud, _ready=False),
+@inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud),
                    )
 class AwsRouteTable(AwsManaged):
 
@@ -534,9 +547,9 @@ class AwsRouteTable(AwsManaged):
     async def delete(self):
         if hasattr(self, 'association'):
             logger.info(f"Deleting association for {self} and {self.association}")
-            run_in_executor(self.association.delete)
+            await run_in_executor(self.association.delete)
         logger.info(f"Deleting {self}")
-        await run_in_executor(self.delete)
+        await run_in_executor(self.mob.delete)
 
     def do_create(self):
         try:
