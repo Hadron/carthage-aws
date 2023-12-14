@@ -15,7 +15,7 @@ from carthage import *
 from carthage.dependency_injection import *
 from carthage.network import TechnologySpecificNetwork, this_network
 from carthage.config import ConfigLayout
-from carthage.modeling import NetworkModel, InjectableModel, ModelContainer, provides
+from carthage.modeling import NetworkModel, InjectableModel, ModelContainer, provides, no_inject_name
 from carthage.utils import when_needed
 import carthage.machine
 
@@ -33,6 +33,7 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
 
     stamp_type = "vpc"
     resource_type = 'vpc'
+    resource_factory_method = 'Vpc'
 
     vpc_cidr:str = None #: String representation of the v4 CIDR block for the VPC
 
@@ -211,6 +212,7 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
 
     stamp_type = "security-group"
     resource_type = "security_group"
+    resource_factory_method='SecurityGroup'
 
     def __init__(self,  **kwargs):
         if 'description' in kwargs:
@@ -313,6 +315,10 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
             for g in self.vpc.groups:
                 if g['GroupName'] == self.name: results.append(g['GroupId'])
             return results
+        # Make sure the vpc is instantiated
+        # If it does not exist, then we cannot possibly exist
+        if not self.vpc.id: await self.vpc.find()
+        if not self.vpc.id: return []
         return await run_in_executor(callback)
 
     @property
@@ -326,7 +332,7 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
 # Decorated also with injection for route table after it is defined.
 @inject_autokwargs(connection = InjectionKey(AwsConnection, _ready=True),
                    network=this_network,
-                   vpc=InjectionKey(AwsVirtualPrivateCloud, _ready=True))
+                   vpc=InjectionKey(AwsVirtualPrivateCloud))
 class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
 
     stamp_type = "subnet"
@@ -339,7 +345,9 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
         super().__init__( **kwargs)
         self.name = self.network.name
 
-
+    def __str__(self):
+        return f'AwsSubnet:{self.name} ({self.network.v4_config.network})'
+    
 
     async def find(self):
         await self.vpc.async_become_ready()
@@ -372,11 +380,19 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
             await self.route_table.async_become_ready()
             await self.route_table.associate_subnet(self)
 
+    async def delete(self):
+        await self.find()
+        if not self.mob: return
+        logger.info('Deleting %s', self)
+        await run_in_executor(self.mob.delete)
+        
 @inject_autokwargs(
     ip_address = InjectionKey('ip_address', _optional=NotPresent))
 class VpcAddress(AwsManaged):
 
     resource_type = 'elastic_ip'
+    resource_factory_method = 'VpcAddress'
+
     stamp_type = 'elastic_ip'
     ip_address = None
 
@@ -462,13 +478,14 @@ async def network_for_existing_vm(vm, security_groups):
 
 __all__ += ['network_for_existing_vm']
 
-@inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud, _ready=False),
+@inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud),
                    )
 class AwsRouteTable(AwsManaged):
 
 
     stamp_type = "route_table"
     resource_type = "route_table"
+    resource_factory_method = 'RouteTable'
 
     #: A list or tuple of routes (destination, target, kind) to
     #install.  If set, then whenever this changes, all routes besides
@@ -530,9 +547,9 @@ class AwsRouteTable(AwsManaged):
     async def delete(self):
         if hasattr(self, 'association'):
             logger.info(f"Deleting association for {self} and {self.association}")
-            run_in_executor(self.association.delete)
+            await run_in_executor(self.association.delete)
         logger.info(f"Deleting {self}")
-        await run_in_executor(self.delete)
+        await run_in_executor(self.mob.delete)
 
     def do_create(self):
         try:
@@ -555,7 +572,20 @@ class AwsRouteTable(AwsManaged):
     @configure_routes.hash()
     def configure_routes(self):
         return repr(self.routes)
+
+    async def dynamic_dependencies(self):
+        '''
+        See :func:`carthage.deployment.Deployable.dynamic_dependencies` for documentation.
+        Returns dependencies for any routes
+        '''
+        results = []
+        with instantiation_not_ready():
+            for destination, target, *rest in self.routes:
+                target = await resolve_deferred(self.ainjector, target, args=dict(destination=destination, kind=rest[0] if len(rest) else None))
+                results.append(target)
+        return results
     
+
 inject(route_table=InjectionKey(AwsRouteTable, _optional=NotPresent))(AwsSubnet)
 
 __all__ += ['AwsRouteTable']
@@ -567,6 +597,7 @@ class AwsInternetGateway(AwsManaged):
                 
     stamp_type = "internet_gateway"
     resource_type = "internet_gateway"
+    resource_factory_method = 'InternetGateway'
 
     vpc:AwsVirtualPrivateCloud = None
 
@@ -643,7 +674,7 @@ async def aws_link_handle_eip(model, link):
 
 @inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud),
                    )
-class AwsNatGateway(AwsManaged, carthage.machine.NetworkedModel, InjectableModel):
+class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel):
 
     '''
     Represents a AWS NAT Gateway.
@@ -660,6 +691,8 @@ class AwsNatGateway(AwsManaged, carthage.machine.NetworkedModel, InjectableModel
     
     stamp_type ='nat_gateway'
     resource_type = 'natgateway'
+    resource_factory_method = NotImplemented
+    network_implementation_class = no_inject_name(AwsSubnet)
 
     connectivity_type = 'public' #: public or private
 
@@ -669,8 +702,14 @@ class AwsNatGateway(AwsManaged, carthage.machine.NetworkedModel, InjectableModel
         if connectivity_type: self.connectivity_type = connectivity_type
         if self.connectivity_type == 'public' and VpcAddress not in self.injector:
             self.injector.add_provider(InjectionKey(VpcAddress),
-                                       when_needed(VpcAddress, name=self.name+ 'address'))
-            
+                                       when_needed(VpcAddress, name=self.name+ ' address'))
+
+    async def  dynamic_dependencies(self):
+        results = await super().dynamic_dependencies()
+        if VpcAddress in self.injector:
+            results.append(await self.ainjector.get_instance_async(
+                InjectionKey(VpcAddress, _ready=False)))
+        return results
         
     def find_from_id(self):
         try:

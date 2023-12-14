@@ -21,6 +21,7 @@ __all__ = []
 class AwsVolume(AwsManaged, InjectableModel):
 
     resource_type = 'volume'
+    resource_factory_method = 'Volume'
     
     role = None
     volume_size = None
@@ -152,6 +153,7 @@ __all__ += ['attach_volume_task']
 class AwsSnapshot(AwsManaged, InjectableModel):
 
     resource_type = 'snapshot'
+    resource_factory_method = 'Snapshot'
 
     @memoproperty
     def description(self):
