@@ -78,8 +78,9 @@ async def test_image_building(carthage_layout, request):
     con = await layout.ainjector.get_instance_async(AwsConnection)
     try:
         instance =  layout.image_builder
-        await instance.async_become_ready()
-        with TestTiming(1200):
+        with TestTiming(2000):
+            await instance.async_become_ready()
+        with TestTiming(2000):
             await instance.machine.async_become_ready()
         #instance.machine.ssh('-A', _fg=True)
         #breakpoint()
@@ -121,7 +122,8 @@ async def test_elastic_ip(carthage_layout):
         assert str(layout.ip_test.network_links['eth0'].merged_v4_config.public_address )== layout.ip_1.ip_address
     finally:
         if layout.ip_test.machine.mob:
-            await layout.ip_test.machine.delete()
+            with TestTiming(2000):
+                await layout.ip_test.machine.delete()
         await layout.ip_1.delete()
     
 @async_test
@@ -164,21 +166,25 @@ async def test_aws_subnet_create(ainjector):
         private_subnet = None
         vpc = await ainjector.get_instance_async(creation_vpc)
         with instantiation_not_ready():
-            subnet = await vpc.created_subnet.access_by(AwsSubnet)
+            with TestTiming(2000):
+                subnet = await vpc.created_subnet.access_by(AwsSubnet)
         await subnet.find()
         assert not subnet.mob
         await subnet.async_become_ready()
         assert subnet.mob
         assert subnet.mob.availability_zone == subnet._gfi("aws_availability_zone")
-        with TestTiming(300):
+        with TestTiming(2000):
             private_subnet = await vpc.private_subnet.access_by(AwsSubnet)
     finally:
         try:
-            nat_gw = await vpc.ainjector.get_instance_async(InjectionKey('nat_gw', _ready=False))
-            await nat_gw.delete()
-            await asyncio.sleep(5)
+            with TestTiming(2000):
+                nat_gw = await vpc.ainjector.get_instance_async(InjectionKey('nat_gw', _ready=False))
+                await nat_gw.delete()
+                await asyncio.sleep(5)
         except Exception: logger.exception('error deleting nat GW')
         #if private_subnet:
             #await private_subnet.delete()
-        if vpc: await vpc.delete()
+        if vpc: 
+            with TestTiming(2000):
+                await vpc.delete()
         
