@@ -30,14 +30,19 @@ class AwsHostedZone(AwsManaged, DnsZone):
     
     pass_name_to_super = False
 
-    def __init__(self, **kwargs):
+    def __init__(self, private:bool=False, **kwargs):
         super().__init__(**kwargs)
 
         self.allrrtype = ['SOA','A','TXT','NS','CNAME','MX','NAPTR','PTR','SRV','SPF','AAAA','CAA','DS']
 
         self.region = self.config_layout.aws.region
-        self.private = False
-
+        self.private = private
+        if self.private:
+            try:
+                self.vpc_id = kwargs['vpc_id']
+                self.vpc_region = kwargs['vpc_region']
+            except KeyError:
+                raise TypeError(f"When creating a private hosted zone `vpc_id` and `vpc_region` must not be None")
         self.client = self.service_resource
 
     @memoproperty
@@ -89,19 +94,20 @@ class AwsHostedZone(AwsManaged, DnsZone):
 
     def do_create(self):
         try:
-            r = self.client.create_hosted_zone(
-                Name=self.name,
-                # this will be necessary for private hosted zone
-                # VPC={
-                #     'VPCRegion': self.region,
-                #     'VPCId': self.vpc_id
-                # },
-                CallerReference=str(datetime.now().timestamp()),
-                HostedZoneConfig={
+            aws_kwargs = {
+                "Name": self.name,
+                "CallerReference": str(datetime.now().timestamp()),
+                "HostedZoneConfig": {
                     'Comment': 'Created by Carthage',
                     'PrivateZone': self.private
                 }
-            )
+            }
+            if self.private:
+                aws_kwargs["VPC"] = {
+                    'VPCRegion': self.vpc_region,
+                    'VPCId': self.vpc_id
+                }
+            r = self.client.create_hosted_zone(**aws_kwargs)
             self.mob = r
             # [12:] is because we want to trim `/hostedzone/` off of the zone Id
             self.id = r['HostedZone']['Id'][12:]
