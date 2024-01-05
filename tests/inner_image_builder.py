@@ -17,6 +17,7 @@ from carthage.pytest import *
 @async_test
 async def test_actually_build_image(carthage_layout):
     layout = carthage_layout
+    layout.do_cleanup = False
     instance = layout.image_builder.machine
     await instance.is_machine_running()
     with TestTiming(1300):

@@ -20,8 +20,13 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
 
     add_provider(DebianImage)
     add_provider(machine_implementation_key, dependency_quote(AwsVm))
-    add_provider(InjectionKey(DnsZone, role='public_zone'),
-                 when_needed(AwsHostedZone, name="autotest.photon.ac"))
+
+    @provides(InjectionKey(DnsZone, role='public_zone'))
+    class autotest_photon_ac(AwsHostedZone, InjectableModel):
+
+        name = 'autotest.photon.ac'
+        add_provider(destroy_policy, DeletionPolicy.retain)
+        
     add_provider(WriteAuthorizedKeysPlugin, allow_multiple=True)
     #aws_key_name = 'main'
     add_provider(InjectionKey('aws_ami'), image_provider(owner=debian_ami_owner, name='debian-12-amd64-*'))

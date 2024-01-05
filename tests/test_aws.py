@@ -176,15 +176,6 @@ async def test_aws_subnet_create(ainjector):
         with TestTiming(2000):
             private_subnet = await vpc.private_subnet.access_by(AwsSubnet)
     finally:
-        try:
-            with TestTiming(2000):
-                nat_gw = await vpc.ainjector.get_instance_async(InjectionKey('nat_gw', _ready=False))
-                await nat_gw.delete()
-                await asyncio.sleep(5)
-        except Exception: logger.exception('error deleting nat GW')
-        #if private_subnet:
-            #await private_subnet.delete()
-        if vpc: 
-            with TestTiming(2000):
-                await vpc.delete()
-        
+        with TestTiming(2000):
+            print(await vpc.ainjector(run_deployment_destroy))
+            
