@@ -144,6 +144,7 @@ class ImageBuilderPipeline(MachineCustomization, InjectableModel):
     attach_volume = customization_task(AttachImageBuilderVolume)
     aws_image_size = injector_access('aws_image_size')
 
+    __str__ = MachineCustomization.__repr__
     def __init__(self,
                  name,
                  description=None,
