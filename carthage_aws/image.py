@@ -112,6 +112,13 @@ class AttachImageBuilderVolume(MachineCustomization, InjectableModel):
 
     description = "Attach image builder volume"
 
+    def __repr__(self):
+        return "ainjector(AttachImageBuilderVolume)"
+
+    # InjectableModel.__str__ gives bad results especially with BaseCustomization.__getattr__
+    __str__ = __repr__
+    
+    
     image_builder_volume = ImageBuilderVolume
 
     @setup_task("Attach  image builder Volume")
