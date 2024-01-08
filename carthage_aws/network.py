@@ -36,24 +36,37 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
     resource_factory_method = 'Vpc'
 
     vpc_cidr:str = None #: String representation of the v4 CIDR block for the VPC
+    dns_hostnames_enabled:bool = None
 
-
-    def __init__(self,  vpc_cidr=None, **kwargs):
+    def __init__(self,  vpc_cidr=None, dns_hostnames_enabled=None, **kwargs):
         super().__init__( **kwargs)
         config = self.config_layout
         if self.name is None:
             if config.aws.vpc_name == None:
                 self.name = ''
-            else: self.name = config.aws.vpc_name
+            else: 
+                self.name = config.aws.vpc_name
         if self.id is None:
             if config.aws.vpc_id == None:
                 self.id = ''
-            else: self.id = config.aws.vpc_id
-        if vpc_cidr: self.vpc_cidr = vpc_cidr
+            else: 
+                self.id = config.aws.vpc_id
+
+        if dns_hostnames_enabled:
+            self.dns_hostnames_enabled = dns_hostnames_enabled
+        if self.dns_hostnames_enabled is None:
+            self.dns_hostnames_enabled = config.aws.vpc_dns_hostnames_enabled
+
+        if vpc_cidr: 
+            self.vpc_cidr = vpc_cidr
         if self.vpc_cidr is None:
             self.vpc_cidr = str(config.aws.vpc_cidr)
+
         self.vms = []
         self.injector.add_provider(InjectionKey(AwsVirtualPrivateCloud), dependency_quote(self))
+        if  not (self.name or self.id):
+            # We do not want to accidentally reconfigure or delete the default VPC
+            self.readonly = True
         
 
     async def find(self):
@@ -126,6 +139,16 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
             try: rt.delete()
             except: pass
         await run_in_executor(self.mob.delete)
+
+    async def read_write_hook(self):
+        def callback():
+            result = self.mob.describe_attribute(Attribute="enableDnsHostnames")
+            is_dns_hostnames_enabled = result["EnableDnsHostnames"]["Value"]
+            if is_dns_hostnames_enabled != self.dns_hostnames_enabled:
+                resp = self.mob.modify_attribute(
+                    EnableDnsHostnames={"Value":self.dns_hostnames_enabled},
+                )
+        await run_in_executor(callback)
 
 
 @dataclasses.dataclass(frozen=True)
