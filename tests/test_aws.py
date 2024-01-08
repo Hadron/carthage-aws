@@ -164,6 +164,10 @@ async def test_aws_subnet_create(ainjector):
         ainjector.add_provider(creation_vpc)
         vpc = None
         private_subnet = None
+        try:
+            vpc_to_cleanup = await ainjector(creation_vpc, readonly=True)
+            await vpc_to_cleanup.ainjector(run_deployment_destroy)
+        except LookupError: pass
         vpc = await ainjector.get_instance_async(creation_vpc)
         with instantiation_not_ready():
             with TestTiming(2000):
