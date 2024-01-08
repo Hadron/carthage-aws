@@ -22,8 +22,8 @@ __all__ += ['AwsVirtualPrivateCloud', 'AwsSubnet',
             'VpcAddress', 'network_for_existing_vm',
             'AwsRouteTable', 'AwsInternetGateway', 'AwsNatGateway']
 
-from .dns import AwsHostedZone, AwsDnsManagement
-__all__ += ['AwsHostedZone', 'AwsDnsManagement']
+from .dns import AwsHostedZone, AwsPrivateHostedZone, AwsDnsManagement
+__all__ += ['AwsHostedZone', 'AwsPrivateHostedZone', 'AwsDnsManagement']
 
 from .vm import AwsVm, MaybeLocalAwsVm
 __all__ += ['AwsVm', 'MaybeLocalAwsVm']
@@ -53,6 +53,7 @@ class AwsConfig(ConfigSchema, prefix = "aws"):
     vpc_id: ConfigString
     #: CIDR block to allocate to created VPC
     vpc_cidr: IPv4Network = IPv4Network('192.168.0.0/16')
+    vpc_dns_hostnames_enabled: bool = False
     
 
 @inject(injector=Injector)

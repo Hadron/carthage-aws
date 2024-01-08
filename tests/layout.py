@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from carthage import *
 from carthage_aws import *
+from carthage_aws.dns import AwsPrivateHostedZone
 from carthage_base import CarthageServerRole, DebianImage
 from carthage.modeling import *
 from carthage.cloud_init import WriteAuthorizedKeysPlugin
@@ -26,7 +27,12 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
 
         name = 'autotest.photon.ac'
         add_provider(destroy_policy, DeletionPolicy.retain)
-        
+    
+    @provides(InjectionKey(DnsZone, role="private_zone"))
+    class autotest_photon_local(AwsPrivateHostedZone, InjectableModel):
+        name = "autotest.photon.local"
+    
+
     add_provider(WriteAuthorizedKeysPlugin, allow_multiple=True)
     #aws_key_name = 'main'
     add_provider(InjectionKey('aws_ami'), image_provider(owner=debian_ami_owner, name='debian-12-amd64-*'))
@@ -46,6 +52,13 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
         add('eth0', mac=None,
             net=InjectionKey("our_net"))
 
+    class test_private_vm(MachineModel):
+        name = "private-vm"
+        cloud_init = True
+        aws_instance_type = "t2.micro"
+        
+        class net_config(NetworkConfigModel):
+            add('eth0', mac=None, net=InjectionKey("our_net"))
 
 
     class test_vm(MachineModel):

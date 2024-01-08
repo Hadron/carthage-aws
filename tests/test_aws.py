@@ -6,7 +6,7 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
 import asyncio, logging
-
+from attr import Attribute
 
 import pytest
 from carthage import *
@@ -27,8 +27,38 @@ async def test_base_vm(carthage_layout):
     finally:
         try: layout.test_vm.machine.mob.terminate()
         except Exception: pass
-    
-                           
+
+@async_test
+async def test_record_private_zone(carthage_layout):
+    layout = carthage_layout
+    zone = await layout.ainjector.get_instance_async('autotest_photon_local')
+    con = await layout.ainjector.get_instance_async(AwsConnection)
+    try:
+        await zone.update_records(
+            *[('autotest.photon.local', 'TXT', '"This is a test"'),]
+        )
+    except Exception as e:
+        logger.error(e)
+        raise Exception("Failed to update update_records")
+
+    instance =  layout.test_private_vm
+    await instance.machine.start_machine()
+    await instance.machine.ssh_online()
+    await instance.machine.ssh("apt update && apt install -y dnsutils")
+    with TestTiming(2000):
+        timeout = 300
+        interval = 5
+        start_time = asyncio.get_event_loop().time()
+        resp = await instance.machine.ssh("dig +short TXT autotest.photon.local")
+        output = resp.stdout.decode()
+        try:
+            assert "This is a test" in output
+        except AssertionError as e:
+            if asyncio.get_event_loop().time() - start_time > timeout:
+                raise e
+            await asyncio.sleep(interval)
+
+
 @async_test
 async def test_read_only(carthage_layout):
     layout = carthage_layout
@@ -134,6 +164,8 @@ async def test_aws_subnet_create(ainjector):
     class creation_vpc(AwsVirtualPrivateCloud, InjectableModel):
         name = 'creation_vpc'
         vpc_cidr = '10.1.0.0/16'
+        dns_hostnames_enabled = True
+
         class route_table(AwsRouteTable):
             name = 'test_route_table'
             
@@ -173,6 +205,8 @@ async def test_aws_subnet_create(ainjector):
         await subnet.async_become_ready()
         assert subnet.mob
         assert subnet.mob.availability_zone == subnet._gfi("aws_availability_zone")
+        result =  vpc.mob.describe_attribute(Attribute="enableDnsHostnames")
+        assert result["EnableDnsHostnames"]["Value"] == True
         with TestTiming(2000):
             private_subnet = await vpc.private_subnet.access_by(AwsSubnet)
     finally:

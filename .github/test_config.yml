@@ -7,5 +7,6 @@ aws:
   secret_access_key: ${AWS_SECRET_KEY}
   region: us-east-1
   vpc_name: test_vpc
+  vpc_dns_hostnames_enabled: true
 base_dir: /tmp/carthage-base
 checkout_dir: /tmp/carthage-base/checkout

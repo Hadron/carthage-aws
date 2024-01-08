@@ -7,19 +7,15 @@
 # LICENSE for details.
 from carthage import *
 from carthage.dependency_injection import *
-from carthage.network import NetworkLink
-from carthage.config import ConfigLayout
 from carthage.modeling import *
 from carthage.dns import DnsZone
 import collections.abc
 
-from pathlib import Path
-import os
 import warnings
 
-from .connection import AwsConnection, AwsManaged, run_in_executor
+from .connection import AwsManaged, run_in_executor
+from .network import AwsVirtualPrivateCloud 
 
-import boto3
 from botocore.exceptions import ClientError
 
 from datetime import datetime
@@ -29,6 +25,7 @@ __all__ = ['AwsHostedZone', 'AwsDnsManagement']
 class AwsHostedZone(AwsManaged, DnsZone):
     
     pass_name_to_super = False
+    private = False
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -36,7 +33,6 @@ class AwsHostedZone(AwsManaged, DnsZone):
         self.allrrtype = ['SOA','A','TXT','NS','CNAME','MX','NAPTR','PTR','SRV','SPF','AAAA','CAA','DS']
 
         self.region = self.config_layout.aws.region
-        self.private = False
 
         self.client = self.service_resource
 
@@ -131,7 +127,7 @@ class AwsHostedZone(AwsManaged, DnsZone):
         Typical usage::
             zone.update_records(
                 [
-                    ('foo.zone.org', 'A', '1.2.3.4''),
+                    ('foo.zone.org', 'A', '1.2.3.4'),
                     ('bar.zone.org', 'NS', ['ns1.zone.org', 'ns2.zone.org'])
                 ]
             )
@@ -173,6 +169,94 @@ class AwsHostedZone(AwsManaged, DnsZone):
         except ClientError as e:
             logger.error(f'Could not upsert {args} because {e}.')
 
+
+@inject_autokwargs(vpc=AwsVirtualPrivateCloud)
+class AwsPrivateHostedZone(AwsHostedZone):
+    private = True
+    vpc_id = ""
+    
+    async def pre_create_hook(self):
+        await self.vpc.async_become_ready()
+        self.vpc_id = self.vpc.id
+    
+    def find_from_id(self):
+        try:
+            r = self.client.get_hosted_zone(Id=self.id)
+            # perhaps we want to wrap mob as dict of attrs
+            self.mob = r
+            self.config = r['HostedZone']['Config']
+            self.name = r['HostedZone']['Name']
+            if self.name.endswith('.'): self.name = self.name[:-1]
+        except ClientError as e:
+            logger.error(f'Could not find hostedzone for {self.id} by id because {e}.')
+        return self.mob
+
+    def do_create(self):
+        if not self.vpc_id:
+            raise ValueError("vpc_id must be set before creating a hosted zone.")
+        
+        result = self.vpc.mob.describe_attribute(Attribute="enableDnsHostnames")
+        if not result["EnableDnsHostnames"]["Value"]:
+            raise ValueError("EnableDnsHostnames must be enabled for vpc_id %s for private hosted zones.", self.vpc.id)
+       
+        try:
+            r = self.client.create_hosted_zone(
+                Name=self.name,
+                VPC={
+                    "VPCRegion": self.region,
+                    "VPCId": self.vpc_id
+                },
+                CallerReference=str(datetime.now().timestamp()),
+                HostedZoneConfig={
+                    'Comment': 'Created by Carthage',
+                    'PrivateZone': self.private
+                }
+            )
+            self.mob = r
+            # [12:] is because we want to trim `/hostedzone/` off of the zone Id
+            self.id = r['HostedZone']['Id'][12:]
+            self.config = r['HostedZone']['Config']
+            self.name = r['HostedZone']['Name'][:-1]
+        except ClientError as e:
+            logger.error(f'Could not create AwsHostedZone for \
+{self.name} because {e}.')
+
+    async def delete(self):
+        # before we can delete the hosted zone all non-required records must be deleted.
+        await self.clear()
+        try:
+            self.client.delete_hosted_zone(Id=self.id)
+        except ClientError as e:
+            logger.error("Failed to delete Private Hosted Zone %s", self.id)
+            raise e
+
+    async def clear(self):
+        """
+        Delete all non required DNS records from the zone. 
+        """
+        try:
+            paginator = self.client.get_paginator('list_resource_record_sets')
+            source_record_sets = paginator.paginate(HostedZoneId=self.id)
+            
+            changes = []
+            for record_set in source_record_sets:
+                for record in record_set['ResourceRecordSets']:
+                    if record["Type"] not in ["NS", "SOA"]:
+                        changes.append({
+                            'Action': 'DELETE',
+                            'ResourceRecordSet': record
+                        })
+
+            if changes:
+                change_batch = {'Changes': changes}
+                self.client.change_resource_record_sets(
+                    HostedZoneId=self.id, 
+                    ChangeBatch=change_batch
+                )
+
+        except ClientError as e:
+            logger.error(f"An error occurred: {e}")
+            raise e
 
 class AwsDnsManagement(InjectableModel):
 
