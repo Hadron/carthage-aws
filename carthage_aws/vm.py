@@ -98,6 +98,15 @@ class AwsVm(AwsManaged, Machine):
 
     pass_name_to_super = True
 
+    @memoproperty
+    def aws_ip_address_is_private(self):
+        '''
+        If True, then ip_address will be populated with the private address of the instance if it is not otherwise set in a subclass or the model.
+
+        By default, this is True if :meth:`ssh_jump_host` is set, otherwise False.
+        '''
+        return bool(self.ssh_jump_host)
+    
     def __init__(self, name, **kwargs):
         self.name = ""
         super().__init__(name=name, **kwargs)
@@ -108,13 +117,19 @@ class AwsVm(AwsManaged, Machine):
 
     def _find_ip_address(self):
         def async_cb():
-            for network_link in updated_links:
+            for network_link in updated_private_links:
+                self.injector.emit_event(
+                    InjectionKey(NetworkLink),
+                    "address", network_link,
+                    addl_keys=[InjectionKey(NetworkLink, host=self.name)])
+            for network_link in updated_public_links:
                 self.injector.emit_event(
                     InjectionKey(NetworkLink),
                     "public_address", network_link,
                     adl_keys=[InjectionKey(NetworkLink, host=self.name)])
                 
-        updated_links = []
+        updated_public_links = []
+        updated_private_links = []
         update_ip_address = False
         if self.__class__.ip_address is Machine.ip_address:
             try:
@@ -130,6 +145,13 @@ class AwsVm(AwsManaged, Machine):
             if network_link.net_instance.mob != interface.subnet:
                 logger.warning(f'Instance {self.id}: network links do not match instance interface for {network_link.interface}')
                 continue
+            private_address = IPv4Address(interface.private_ip_address)
+            if private_address != network_link.merged_v4_config.address:
+                network_link.merged_v4_config.address = private_address
+                if update_ip_address and self.aws_ip_address_is_private:
+                    self.ip_address = str(private_address)
+                    self._clear_ip_address = True
+                updated_private_links.append(network_link)
             if not interface.association_attribute: continue
             association = interface.association_attribute
             if not ('PublicIp' in association and association['PublicIp']): continue
@@ -144,11 +166,11 @@ class AwsVm(AwsManaged, Machine):
                 else:
                     # public_v4_address being updated from association
                     network_link.merged_v4_config.public_address = address
-                updated_links.append(network_link)
-                if update_ip_address:
-                    self.ip_address = str(address)
-                    self._clear_ip_address = True
-        if updated_links:
+            updated_public_links.append(network_link)
+            if update_ip_address and not self.aws_ip_address_is_private:
+                self.ip_address = str(address)
+                self._clear_ip_address = True
+        if updated_public_links or updated_private_links:
             self.ainjector.loop.call_soon_threadsafe(async_cb)
             
     async def find(self):
