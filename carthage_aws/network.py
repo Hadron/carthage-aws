@@ -36,9 +36,9 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
     resource_factory_method = 'Vpc'
 
     vpc_cidr:str = None #: String representation of the v4 CIDR block for the VPC
-    dns_hostnames_enabled:bool = False
+    dns_hostnames_enabled:bool = None
 
-    def __init__(self,  vpc_cidr=None, **kwargs):
+    def __init__(self,  vpc_cidr=None, dns_hostnames_enabled=None, **kwargs):
         super().__init__( **kwargs)
         config = self.config_layout
         if self.name is None:
@@ -46,16 +46,22 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
                 self.name = ''
             else: 
                 self.name = config.aws.vpc_name
-            self.dns_hostnames_enabled = config.aws.vpc_dns_hostnames_enabled
         if self.id is None:
             if config.aws.vpc_id == None:
                 self.id = ''
             else: 
                 self.id = config.aws.vpc_id
+
+        if dns_hostnames_enabled:
+            self.dns_hostnames_enabled = dns_hostnames_enabled
+        if self.dns_hostnames_enabled is None:
             self.dns_hostnames_enabled = config.aws.vpc_dns_hostnames_enabled
-        if vpc_cidr: self.vpc_cidr = vpc_cidr
+
+        if vpc_cidr: 
+            self.vpc_cidr = vpc_cidr
         if self.vpc_cidr is None:
             self.vpc_cidr = str(config.aws.vpc_cidr)
+
         self.vms = []
         self.injector.add_provider(InjectionKey(AwsVirtualPrivateCloud), dependency_quote(self))
         if  not (self.name or self.id):
