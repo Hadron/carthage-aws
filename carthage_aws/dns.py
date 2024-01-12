@@ -107,6 +107,47 @@ class AwsHostedZone(AwsManaged, DnsZone):
         except ClientError as e:
             logger.error(f'Could not create AwsHostedZone for \
 {self.name} because {e}.')
+    
+    async def delete(self):
+        # before we can delete the hosted zone all non-required records must be deleted.
+        await self.clear()
+        def callback():
+            try:
+                self.client.delete_hosted_zone(Id=self.id)
+            except ClientError as e:
+                logger.error("Failed to delete Private Hosted Zone %s", self.id)
+                raise e
+        await run_in_executor(callback)
+
+    async def clear(self):
+        """
+        Delete all non required DNS records from the zone. 
+        """
+        def callback():
+            try:
+                paginator = self.client.get_paginator('list_resource_record_sets')
+                source_record_sets = paginator.paginate(HostedZoneId=self.id)
+                
+                changes = []
+                for record_set in source_record_sets:
+                    for record in record_set['ResourceRecordSets']:
+                        if record["Type"] not in ["NS", "SOA"]:
+                            changes.append({
+                                'Action': 'DELETE',
+                                'ResourceRecordSet': record
+                            })
+
+                if changes:
+                    change_batch = {'Changes': changes}
+                    self.client.change_resource_record_sets(
+                        HostedZoneId=self.id, 
+                        ChangeBatch=change_batch
+                    )
+
+            except ClientError as e:
+                logger.error(f"An error occurred: {e}")
+                raise e
+        await run_in_executor(callback)
 
     async def delegate_zone(self, parent):
         def callback():
@@ -221,42 +262,6 @@ class AwsPrivateHostedZone(AwsHostedZone):
             logger.error(f'Could not create AwsHostedZone for \
 {self.name} because {e}.')
 
-    async def delete(self):
-        # before we can delete the hosted zone all non-required records must be deleted.
-        await self.clear()
-        try:
-            self.client.delete_hosted_zone(Id=self.id)
-        except ClientError as e:
-            logger.error("Failed to delete Private Hosted Zone %s", self.id)
-            raise e
-
-    async def clear(self):
-        """
-        Delete all non required DNS records from the zone. 
-        """
-        try:
-            paginator = self.client.get_paginator('list_resource_record_sets')
-            source_record_sets = paginator.paginate(HostedZoneId=self.id)
-            
-            changes = []
-            for record_set in source_record_sets:
-                for record in record_set['ResourceRecordSets']:
-                    if record["Type"] not in ["NS", "SOA"]:
-                        changes.append({
-                            'Action': 'DELETE',
-                            'ResourceRecordSet': record
-                        })
-
-            if changes:
-                change_batch = {'Changes': changes}
-                self.client.change_resource_record_sets(
-                    HostedZoneId=self.id, 
-                    ChangeBatch=change_batch
-                )
-
-        except ClientError as e:
-            logger.error(f"An error occurred: {e}")
-            raise e
 
 class AwsDnsManagement(InjectableModel):
 
