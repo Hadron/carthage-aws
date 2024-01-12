@@ -52,7 +52,7 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
             else: 
                 self.id = config.aws.vpc_id
 
-        if dns_hostnames_enabled:
+        if dns_hostnames_enabled is not None:
             self.dns_hostnames_enabled = dns_hostnames_enabled
         if self.dns_hostnames_enabled is None:
             self.dns_hostnames_enabled = config.aws.vpc_dns_hostnames_enabled
