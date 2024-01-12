@@ -53,6 +53,8 @@ class AwsConfig(ConfigSchema, prefix = "aws"):
     vpc_id: ConfigString
     #: CIDR block to allocate to created VPC
     vpc_cidr: IPv4Network = IPv4Network('192.168.0.0/16')
+    #: DnsHostnamesEnable setting for VPCs
+    # https://docs.aws.amazon.com/vpc/latest/userguide/vpc-dns.html#vpc-dns-support
     vpc_dns_hostnames_enabled: bool = False
     
 
