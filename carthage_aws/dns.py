@@ -51,7 +51,10 @@ class AwsHostedZone(AwsManaged, DnsZone):
         try:
             # we look for a hosted zone with our exact name
             r = self.client.list_hosted_zones_by_name(DNSName=self.name)
-            if len(r['HostedZones']) > 0:
+            # But DNSName is not an exact match; it is a starting point
+            # so we need to make sure that the zone name is ours.
+            if len(r['HostedZones']) > 0 \
+               and r['HostedZones'][0]['Name'] == self.name+'.':
                 # [12:] is because we want to trim `/hostedzone/` off of the zone Id
                 self.id = r['HostedZones'][0]['Id'][12:]
         except ClientError as e:
