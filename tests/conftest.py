@@ -1,6 +1,6 @@
 pytest_plugins = ('carthage.pytest_plugin',)
 
-import asyncio, logging
+import logging
 import pytest
 import carthage.ssh
 from carthage import *
@@ -35,8 +35,7 @@ async def cleanup(ainjector):
     print(result)
     try:
         while True:
-            image = await ainjector(AwsImage, name='test-ami*')
-            await image.delete()
+            aws_image = await ainjector(AwsImage, name='test-ami*')
+            await aws_image.delete()
     except NotImplementedError:
         pass
-    

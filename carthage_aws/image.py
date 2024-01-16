@@ -6,11 +6,14 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
 import datetime
+import socket
 from pathlib import Path
+
 from carthage import *
 from carthage.debian import *
 from carthage.modeling import *
 from carthage import sh
+
 from .connection import AwsConnection, run_in_executor, AwsManaged
 from .ebs import AwsVolume
 
@@ -27,9 +30,17 @@ def image_provider(
     def callback(connection):
         r = connection.client.describe_images(
             Owners=[owner],
-            Filters=[dict(
-                Name='name',
-                Values=[name])])
+            Filters=[
+                {
+                    "Name":'name',
+                    "Values":[name]
+                },
+                {
+                    "Name":'architecture',
+                    "Values":[architecture],
+                },
+            ]
+        )
         images = r['Images']
         for i in images:
             creation_date = i['CreationDate']
@@ -49,8 +60,7 @@ def image_provider(
             return None
         if all_images:
             return list(map(lambda i: i['ImageId'], images))
-        else:
-            return images[0]['ImageId']
+        return images[0]['ImageId']
     return image_provider_inner
 
 __all__ += ['image_provider']
@@ -67,9 +77,11 @@ class AwsImage(AwsManaged):
     async def possible_ids_for_name(self):
         objs = self.connection.client.describe_images(
             Owners=['self'],
-            Filters=[dict(
-                Name='name',
-                Values=[self.name])])
+            Filters=[{
+                "Name":'name',
+                "Values": [self.name]
+            }]
+        )
         return map(lambda o: o['ImageId'], objs['Images'])
 
     async def get_snapshots(self):
@@ -103,7 +115,7 @@ class ImageBuilderVolume(AwsVolume):
 
 
     @memoproperty
-    def name(self):
+    def name(self): # pylint: disable=method-hidden
         return f'{self.model.name}/image'
 
 __all__ += ['ImageBuilderVolume']
@@ -117,8 +129,6 @@ class AttachImageBuilderVolume(MachineCustomization, InjectableModel):
 
     # InjectableModel.__str__ gives bad results especially with BaseCustomization.__getattr__
     __str__ = __repr__
-    
-    
     image_builder_volume = ImageBuilderVolume
 
     @setup_task("Attach  image builder Volume")
@@ -127,6 +137,7 @@ class AttachImageBuilderVolume(MachineCustomization, InjectableModel):
         await volume.attach(self.host, "/dev/xvdi", delete_on_termination=True)
 
     @attach_volume.check_completed()
+    # pylint: disable=function-redefined
     def attach_volume(self):
         return any(filter(
             lambda mapping: mapping['DeviceName'] == "/dev/xvdi", self.host.mob.block_device_mappings))
@@ -157,24 +168,26 @@ class ImageBuilderPipeline(MachineCustomization, InjectableModel):
         super().__init__(**kwargs)
         self.name = name
         self.image_description = description
-        if self.ena_support is None: self.ena_support = True
-        if self.boot_mode is None: self.boot_mode = 'uefi'
-        if self.architecture is None: self.architecture = "x86_64"
+        if self.ena_support is None:
+            self.ena_support = True
+        if self.boot_mode is None:
+            self.boot_mode = 'uefi'
+        if self.architecture is None:
+            self.architecture = "x86_64"
 
 
     @setup_task("Build image")
     @inject(image=InjectionKey(DebianContainerImage, _ready=False),
             connection=InjectionKey(AwsConnection, _ready=True),
             )
-    async def build_image(self, image, connection):
-        import socket
+    async def build_image(self, aws_image, connection):
         if socket.gethostname() != self.model.name:
             raise SkipSetupTask
-        await image.async_become_ready()
+        await aws_image.async_become_ready()
         volume = await self.ainjector(ImageBuilderVolume)
         await self.ainjector(
             debian_container_to_vm,
-            image, "aws_image.raw",
+            aws_image, "aws_image.raw",
             f'{self.aws_image_size}G',
             classes='+CLOUD_INIT,EC2,GROW')
         await sh.dd(
@@ -188,38 +201,34 @@ _bg = True, _bg_exc = False)
             snap = volume.mob.create_snapshot(Description=self.image_description or self.name)
             snap.wait_until_completed()
             extra = {}
-            if self.image_description: extra['Description'] = self.image_description
+            if self.image_description:
+                extra['Description'] = self.image_description
             client = connection.client
             return client.register_image(
                         Name=self.name,
                 Architecture=self.architecture,
                         EnaSupport=self.ena_support,
                         BootMode=self.boot_mode,
-                BlockDeviceMappings=[dict(
-                    DeviceName='/dev/xvda',
-                    Ebs=dict(
-                        DeleteOnTermination=True,
-                        SnapshotId=snap.id,
-                        VolumeType='gp2',
-                    ))],
+                BlockDeviceMappings=[{
+                    "DeviceName":'/dev/xvda',
+                    "Ebs":{
+                        "DeleteOnTermination":True,
+                        "SnapshotId":snap.id,
+                        "VolumeType":'gp2',
+                    }
+                }],
                 RootDeviceName="/dev/xvda",
                 VirtualizationType='hvm',
             )
         return await run_in_executor(callback)
 
-
-
-
-@inject(
-    injector=Injector,
-    )
+@inject(injector=Injector)
 async def build_ami(
         name,
         *, injector,
         local_model=None,
         **kwargs):
     ainjector = injector(AsyncInjector)
-    import socket
     if local_model is None:
         local_model = await ainjector.get_instance_async(InjectionKey(MachineModel, host=socket.gethostname()))
     machine = await local_model.ainjector.get_instance_async(InjectionKey(Machine))

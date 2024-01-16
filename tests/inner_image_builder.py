@@ -5,14 +5,11 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
-import asyncio, logging
 
-
-import pytest
 from carthage import *
-from carthage_aws import *
 from carthage.modeling import *
 from carthage.pytest import *
+from carthage_aws import *
 
 @async_test
 async def test_actually_build_image(carthage_layout):
@@ -24,4 +21,3 @@ async def test_actually_build_image(carthage_layout):
         await layout.ainjector(build_ami,
                                name="test-ami",
                                add_time_to_name=True)
-    
