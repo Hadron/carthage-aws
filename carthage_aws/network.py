@@ -11,18 +11,18 @@ import dataclasses
 import ipaddress
 import typing
 import warnings
+
+from botocore.exceptions import ClientError
+
 from carthage import *
 from carthage.dependency_injection import *
 from carthage.network import TechnologySpecificNetwork, this_network
-from carthage.config import ConfigLayout
-from carthage.modeling import NetworkModel, InjectableModel, ModelContainer, provides, no_inject_name
+from carthage.modeling import InjectableModel, ModelContainer, provides, no_inject_name
 from carthage.utils import when_needed
 import carthage.machine
 
 from .connection import AwsConnection, AwsManaged, run_in_executor, wait_for_state_change
 
-import boto3
-from botocore.exceptions import ClientError
 
 __all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet', 'AwsSecurityGroup',
            'SgRule']
@@ -31,9 +31,9 @@ __all__ = ['AwsVirtualPrivateCloud', 'AwsSubnet', 'AwsSecurityGroup',
 @inject_autokwargs()
 class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
 
-    stamp_type = "vpc"
-    resource_type = 'vpc'
-    resource_factory_method = 'Vpc'
+    stamp_type:str = "vpc"
+    resource_type:str = 'vpc'
+    resource_factory_method:str = 'Vpc'
 
     vpc_cidr:str = None #: String representation of the v4 CIDR block for the VPC
     dns_hostnames_enabled:bool = None
@@ -44,12 +44,12 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
         if self.name is None:
             if config.aws.vpc_name == None:
                 self.name = ''
-            else: 
+            else:
                 self.name = config.aws.vpc_name
         if self.id is None:
             if config.aws.vpc_id == None:
                 self.id = ''
-            else: 
+            else:
                 self.id = config.aws.vpc_id
 
         if dns_hostnames_enabled is not None:
@@ -57,7 +57,7 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
         if self.dns_hostnames_enabled is None:
             self.dns_hostnames_enabled = config.aws.vpc_dns_hostnames_enabled
 
-        if vpc_cidr: 
+        if vpc_cidr:
             self.vpc_cidr = vpc_cidr
         if self.vpc_cidr is None:
             self.vpc_cidr = str(config.aws.vpc_cidr)
@@ -67,7 +67,8 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
         if  not (self.name or self.id):
             # We do not want to accidentally reconfigure or delete the default VPC
             self.readonly = True
-        
+        self.ig = None
+
 
     async def find(self):
         def find_default():
@@ -76,9 +77,12 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
                 if v['IsDefault']:
                     self.id = v['VpcId']
                     return self.find_from_id()
+            return None
+
         if not self.name and not self.id:
             await run_in_executor(find_default)
-            if self.mob: return
+            if self.mob:
+                return
         return await super().find()
 
     def do_create(self):
@@ -99,20 +103,24 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
                 ig = self.connection.client.create_internet_gateway()
                 self.ig = ig['InternetGateway']['InternetGatewayId']
                 self.connection.client.attach_internet_gateway(InternetGatewayId=self.ig, VpcId=self.id)
-                self.connection.client.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=self.ig, RouteTableId=self.main_route_table_id)
-
+                self.connection.client.create_route(
+                    DestinationCidrBlock='0.0.0.0/0',
+                    GatewayId=self.ig,
+                    RouteTableId=self.main_route_table_id
+                )
 
 
         except ClientError as e:
-            logger.error(f'Could not create AWS VPC {self.name} due to {e}.')
+            logger.error('Could not create AWS VPC %s due to %s.',self.name, e)
 
     @memoproperty
     def main_route_table_id(self):
         r = self.connection.client.describe_route_tables(
             Filters=[
-                dict(Name='vpc-id', Values=[self.id]),
-                dict(Name='association.main',
-                     Values=['true'])])
+                {"Name": 'vpc-id', "Values": [self.id]},
+                {"Name": 'association.main', "Values": ['true']}
+            ]
+        )
         return r['RouteTables'][0]['RouteTableId']
 
     async def post_find_hook(self):
@@ -120,8 +128,12 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
 
     @memoproperty
     def groups(self):
-        groups =self.connection.client.describe_security_groups(Filters=[
-            dict(Name='vpc-id', Values=[self.id])])
+        groups =self.connection.client.describe_security_groups(
+            Filters=[{
+            "Name":'vpc-id',
+            "Values":[self.id]
+            }]
+        )
 
         self.groups = list( groups['SecurityGroups'])
         return self.groups
@@ -130,14 +142,18 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
         for sn in self.mob.subnets.all():
             await run_in_executor(sn.delete)
         for g in self.mob.security_groups.all():
-            try: await run_in_executor(g.delete)
-            except: pass
+            try:
+                await run_in_executor(g.delete)
+            except Exception:
+                pass
         for gw in self.mob.internet_gateways.all():
             gw.detach_from_vpc(VpcId=self.id)
             gw.delete()
         for rt in self.mob.route_tables.all():
-            try: rt.delete()
-            except: pass
+            try:
+                rt.delete()
+            except Exception:
+                pass
         await run_in_executor(self.mob.delete)
 
     async def read_write_hook(self):
@@ -145,7 +161,7 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
             result = self.mob.describe_attribute(Attribute="enableDnsHostnames")
             is_dns_hostnames_enabled = result["EnableDnsHostnames"]["Value"]
             if is_dns_hostnames_enabled != self.dns_hostnames_enabled:
-                resp = self.mob.modify_attribute(
+                self.mob.modify_attribute(
                     EnableDnsHostnames={"Value":self.dns_hostnames_enabled},
                 )
         await run_in_executor(callback)
@@ -166,7 +182,10 @@ class SgRule:
         allzeros_32 = ipaddress.IPv4Network('0.0.0.0/32')
         for e in cidr_out:
             if e == allzeros_32:
-                warnings.warn("You selected a cidr address of 0.0.0.0/32 not 0.0.0.0/0; you almost certainly do not want this", stacklevel=4)
+                warnings.warn(
+                    "You selected a cidr address of 0.0.0.0/32 not 0.0.0.0/0; you almost certainly do not want this",
+                    stacklevel=4
+                )
                 break
         return cidr_out
 
@@ -184,14 +203,15 @@ class SgRule:
     def to_ip_permission(self):
         ip_ranges = []
         for i, ip in enumerate(self.cidr):
-            ip_ranges.append(dict(CidrIp=str(ip)))
+            ip_ranges.append({"CidrIp": str(ip)})
             if i == 0 and self.description:
                 ip_ranges[0]['Description'] = self.description
-        return dict(
-            IpProtocol=str(self.proto),
-            FromPort=self.port[0],
-            ToPort=self.port[1],
-            IpRanges=ip_ranges)
+        return {
+            "IpProtocol":str(self.proto),
+            "FromPort":self.port[0],
+            "ToPort":self.port[1],
+            "IpRanges":ip_ranges
+        }
 
     @classmethod
     def from_ip_permission(cls, permission):
@@ -200,7 +220,8 @@ class SgRule:
                 raise ValueError(f'IpPermission requires {k}')
         description = ""
         for k in ('FromPort', 'ToPort'):
-            if k not in permission: permission[k] = -1
+            if k not in permission:
+                permission[k] = -1
         if permission['IpRanges'] and permission['IpRanges'][0].get('Description'):
             description = permission['IpRanges'][0]['Description']
         return cls(
@@ -263,7 +284,8 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
         # AwsSecurityGroup doesn't need to be a container.
         try:
             provides(cls.our_key())(cls)
-        except AttributeError: pass
+        except AttributeError:
+            pass
         super().__init_subclass__(**kwargs)
 
 
@@ -276,14 +298,18 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
         )
 
         # refresh groups at vpc level
-        try: del self.vpc.groups
-        except Exception: pass
+        try:
+            del self.vpc.groups
+        except Exception:
+            pass
 
     async def delete(self):
         assert not self.readonly
         await run_in_executor(self.mob.delete)
-        try: del self.vpc.groups
-        except Exception: pass
+        try:
+            del self.vpc.groups
+        except Exception:
+            pass
 
 
     @memoproperty
@@ -327,21 +353,28 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
 
         if not self.readonly:
             await run_in_executor(callback)
-            try: del self.existing_ingress
-            except Exception: pass
-            try: del self.existing_egress
-            except Exception: pass
+            try:
+                del self.existing_ingress
+            except Exception:
+                pass
+            try:
+                del self.existing_egress
+            except Exception:
+                pass
 
     async def possible_ids_for_name(self):
         def callback():
             results = []
             for g in self.vpc.groups:
-                if g['GroupName'] == self.name: results.append(g['GroupId'])
+                if g['GroupName'] == self.name:
+                    results.append(g['GroupId'])
             return results
         # Make sure the vpc is instantiated
         # If it does not exist, then we cannot possibly exist
-        if not self.vpc.id: await self.vpc.find()
-        if not self.vpc.id: return []
+        if not self.vpc.id:
+            await self.vpc.find()
+        if not self.vpc.id:
+            return []
         return await run_in_executor(callback)
 
     @property
@@ -363,22 +396,23 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
     resource_factory_method = 'Subnet'
 
     route_table:AwsRouteTable = None #: Route table to associate
-    
+
     def __init__(self,  **kwargs):
         super().__init__( **kwargs)
         self.name = self.network.name
 
     def __str__(self):
         return f'AwsSubnet:{self.name} ({self.network.v4_config.network})'
-    
+
 
     async def find(self):
         await self.vpc.async_become_ready()
-        if self.id: return await run_in_executor(self.find_from_id)
+        if self.id:
+            return await run_in_executor(self.find_from_id)
         for s in self.connection.subnets:
-                if s['vpc'] == self.vpc.id and s['CidrBlock'] == str(self.network.v4_config.network):
-                    self.id = s['id']
-                    return await run_in_executor(self.find_from_id)
+            if s['vpc'] == self.vpc.id and s['CidrBlock'] == str(self.network.v4_config.network):
+                self.id = s['id']
+                return await run_in_executor(self.find_from_id)
 
 
     def do_create(self):
@@ -396,7 +430,8 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
             # No need to associate subnet with main route table
 
         except ClientError as e:
-            raise RuntimeError(f'unable to create AWS subnet for {self}: {e}')
+            logger.error('unable to create AWS subnet for %s: %s', self, e)
+            raise e
 
     async def read_write_hook(self):
         if self.route_table:
@@ -405,10 +440,11 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
 
     async def delete(self):
         await self.find()
-        if not self.mob: return
+        if not self.mob:
+            return
         logger.info('Deleting %s', self)
         await run_in_executor(self.mob.delete)
-        
+
 @inject_autokwargs(
     ip_address = InjectionKey('ip_address', _optional=NotPresent))
 class VpcAddress(AwsManaged):
@@ -434,8 +470,8 @@ class VpcAddress(AwsManaged):
         if self.ip_address and not self.id:
             try:
                 r = await run_in_executor(callback)
-            except ClientError:
-                raise LookupError('IP address specified but does not exist')
+            except ClientError as exc:
+                raise LookupError('IP address specified but does not exist') from exc
             self.id = r['Addresses'][0]['AllocationId']
         res =  await super().find()
         if self.mob:
@@ -453,8 +489,10 @@ class VpcAddress(AwsManaged):
         if self.mob:
             try:
                 await run_in_executor(self.mob.load)
-                if self.mob.association: await run_in_executor(self.mob.association.delete)
-            except Exception: pass
+                if self.mob.association:
+                    await run_in_executor(self.mob.association.delete)
+            except Exception:
+                pass
             await run_in_executor(self.mob.release)
 
 __all__ += ['VpcAddress']
@@ -472,27 +510,36 @@ async def network_for_existing_vm(vm, security_groups):
         class network_config(NetworkConfigModel):
             add('eth0', mac=None, net=InjectionKey("instance_network"))
 
-    This will look up the network associated with an existing VM and instantiate it in the model.  It can be used for example as an up-propagation to put another new instance on the same network.
+    This will look up the network associated with an existing VM
+    and instantiate it in the model.  It can be used for example as an up-propagation
+    to put another new instance on the same network.
     '''
     from .vm import AwsVm
-    from carthage.modeling import NetworkModel, injector_access
+    from carthage.modeling import NetworkModel
     if not isinstance(vm, AwsVm):
         raise TypeError(f'{vm} did not end up being an AwsVm')
     await vm.find()
-    if not vm.mob: raise LookupError(f'Failed to find existing {vm}')
+    if not vm.mob:
+        raise LookupError(f'Failed to find existing {vm}')
     vpc_id =vm.mob.subnet.vpc_id
     try:
         vpc = await vm.ainjector.get_instance_async(InjectionKey(AwsVirtualPrivateCloud, id=vpc_id, _ready=False))
-    except KeyError: vpc = None
+    except KeyError:
+        vpc = None
     class vm_network(NetworkModel):
         v4_config = V4Config(network=vm.mob.subnet.cidr_block)
-        for sg in security_groups or []:
-            add_provider(sg, force_multiple_instantiate=True)
-        try: del sg
-        except NameError: pass
+        if security_groups is not None:
+            for sg in security_groups:
+                add_provider(sg, force_multiple_instantiate=True)
+            try:
+                del sg # pylint: disable=undefined-loop-variable
+            except NameError:
+                pass
         if vpc:
-            add_provider(InjectionKey(AwsVirtualPrivateCloud), injector_xref(
-                InjectionKey(AwsVirtualPrivateCloud, id=vpc_id)))
+            add_provider(
+                InjectionKey(AwsVirtualPrivateCloud),
+                injector_xref(InjectionKey(None, AwsVirtualPrivateCloud, id=vpc_id))
+            )
         else:
             add_provider(InjectionKey(AwsVirtualPrivateCloud),
                          when_needed(AwsVirtualPrivateCloud, id=vpc_id))
@@ -538,13 +585,27 @@ class AwsRouteTable(AwsManaged):
             f'{kind}Id': target.id
         }
         try:
-            r = self.mob.create_route(**kwargs)
+            self.mob.create_route(**kwargs)
         except ClientError as e:
-            logger.error(f'Could not create route {destination}->{target} due to {e}.')
+            logger.error('Could not create route %s->%s due to %s.', destination, target, e)
 
-    async def add_route(self, destination, target, kind=None, exists_ok=False):
-        destination = await resolve_deferred(self.ainjector, destination, args=dict(target=target, kind=kind))
-        target = await resolve_deferred(self.ainjector, target, args=dict(destination=destination, kind=kind))
+    async def add_route(self, destination, target, kind=None):
+        destination = await resolve_deferred(
+            self.ainjector,
+            destination,
+            args={
+                "target":target,
+                "kind":kind
+            }
+        )
+        target = await resolve_deferred(
+            self.ainjector,
+            target,
+            args={
+                "destination":destination,
+                "kind":kind
+        }
+        )
         await run_in_executor(self._add_route, destination, target, kind)
 
     async def associate_subnet(self, subnet):
@@ -552,8 +613,8 @@ class AwsRouteTable(AwsManaged):
             self.mob.associate_with_subnet(SubnetId=subnet.id)
         await run_in_executor(callback)
 
-    async def set_routes(self, *routes, exists_ok=False):
-        def callback(routes):
+    async def set_routes(self, *routes):
+        def callback(routes): # pylint: disable=unused-argument
             numlocal = 0
             for r in list(reversed(self.mob.routes)):
                 if r.gateway_id == 'local':
@@ -569,9 +630,9 @@ class AwsRouteTable(AwsManaged):
 
     async def delete(self):
         if hasattr(self, 'association'):
-            logger.info(f"Deleting association for {self} and {self.association}")
+            logger.info("Deleting association for %s and %s", self, self.association)
             await run_in_executor(self.association.delete)
-        logger.info(f"Deleting {self}")
+        logger.info("Deleting %s", self)
         await run_in_executor(self.mob.delete)
 
     def do_create(self):
@@ -582,12 +643,14 @@ class AwsRouteTable(AwsManaged):
             )
             self.id = r['RouteTable']['RouteTableId']
         except ClientError as e:
-            logger.error(f'Could not create AwsRouteTable {self.name} due to {e}.')
+            logger.error('Could not create AwsRouteTable %s due to %s.', self.name, e)
 
     @setup_task("Configure routes")
     async def configure_routes(self):
-        if self.readonly: raise SkipSetupTask
-        if not self.routes: raise SkipSetupTask
+        if self.readonly:
+            raise SkipSetupTask
+        if not self.routes:
+            raise SkipSetupTask
         # This is a separate setup task so that we can turn it off in
         # subclasses and so that we can have a hash
         await self.set_routes(*self.routes)
@@ -604,20 +667,27 @@ class AwsRouteTable(AwsManaged):
         results = []
         with instantiation_not_ready():
             for destination, target, *rest in self.routes:
-                target = await resolve_deferred(self.ainjector, target, args=dict(destination=destination, kind=rest[0] if len(rest) else None))
+                target = await resolve_deferred(
+                    self.ainjector,
+                    target,
+                    args={
+                        "destination": destination,
+                        "kind": rest[0] if len(rest) else None
+                    }
+                )
                 results.append(target)
         return results
-    
+
 
 inject(route_table=InjectionKey(AwsRouteTable, _optional=NotPresent))(AwsSubnet)
 
 __all__ += ['AwsRouteTable']
 
-        
+
 @inject_autokwargs(
     vpc=InjectionKey(AwsVirtualPrivateCloud, _optional=NotPresent, _ready=False))
 class AwsInternetGateway(AwsManaged):
-                
+
     stamp_type = "internet_gateway"
     resource_type = "internet_gateway"
     resource_factory_method = 'InternetGateway'
@@ -630,7 +700,8 @@ class AwsInternetGateway(AwsManaged):
 
     async def set_attachment(self, *, vpc=None, readonly=False):
 
-        if vpc: await vpc.async_become_ready()
+        if vpc:
+            await vpc.async_become_ready()
 
 	# If they match, we are done.
         if vpc and self.attachment_id and (vpc.id == self.attachment_id):
@@ -645,7 +716,7 @@ class AwsInternetGateway(AwsManaged):
                 self.mob.detach_from_vpc(VpcId=self.attachment_id)
                 self.attachment_id = None
             await run_in_executor(callback)
-            
+
         # Set the correct attachment if requested.
         if vpc.id:
             if readonly:
@@ -659,17 +730,17 @@ class AwsInternetGateway(AwsManaged):
         if not vpc:
             vpc = await self.ainjector.get_instance_async(AwsVirtualPrivateCloud)
         return await self.set_attachment(vpc=vpc, readonly=readonly)
-        
+
     async def detach(self, readonly=False):
         return await self.set_attachment(vpc=None, readonly=readonly)
-        
+
     def delete(self):
         raise NotImplementedError
-        if hasattr(self, 'attachment'):
-            self.detatch()
-        def callback():
-            _ = self.mob.detach_from_vpc(VpcId=self.vpc.id)
-        run_in_executor(callback)
+        # if hasattr(self, 'attachment'):
+        #     self.detatch()
+        # def callback():
+        #     _ = self.mob.detach_from_vpc(VpcId=self.vpc.id)
+        # run_in_executor(callback)
 
     def do_create(self):
         r = self.connection.client.create_internet_gateway(
@@ -677,8 +748,9 @@ class AwsInternetGateway(AwsManaged):
         )
         self.id = r['InternetGateway']['InternetGatewayId']
 
-    async def read_write_hook(self): 
-        if self.vpc: await self.vpc.async_become_ready()
+    async def read_write_hook(self):
+        if self.vpc:
+            await self.vpc.async_become_ready()
         await self.attach(self.vpc)
         if len(getattr(self.mob, 'attachments', [])) > 0:
             self.attachment_id = self.mob.attachments[0]['VpcId']
@@ -693,10 +765,9 @@ async def aws_link_handle_eip(model, link):
             vpc_address = await model.ainjector(VpcAddress, ip_address=str(link.merged_v4_config.public_address))
             link.vpc_address_allocation = vpc_address.id
         except LookupError:
-            logger.warning(f'{model} interface {link.interface} has public address that cannot be assigned')
+            logger.warning('%s interface %s has public address that cannot be assigned', model, link.interface)
 
-@inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud),
-                   )
+@inject_autokwargs(vpc=InjectionKey(AwsVirtualPrivateCloud))
 class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel):
 
     '''
@@ -708,10 +779,11 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
 
     * set vpc_address_allocation to an allocation ID on the link
 
-    * Or as a default operation, the injector associated with the NatGateway can directly provide VpcAddress.  This class provides such a default.
+    * Or as a default operation, the injector associated with the NatGateway can
+      directly provide VpcAddress.  This class provides such a default.
 
     '''
-    
+
     stamp_type ='nat_gateway'
     resource_type = 'natgateway'
     resource_factory_method = NotImplemented
@@ -722,7 +794,10 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
     def __init__(self, connectivity_type=None, **kwargs):
         super().__init__(**kwargs)
         self.network_links = {}
-        if connectivity_type: self.connectivity_type = connectivity_type
+        self.link = None
+        self.subnet = None
+        if connectivity_type:
+            self.connectivity_type = connectivity_type
         if self.connectivity_type == 'public' and VpcAddress not in self.injector:
             self.injector.add_provider(InjectionKey(VpcAddress),
                                        when_needed(VpcAddress, name=self.name+ ' address'))
@@ -733,11 +808,12 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
             results.append(await self.ainjector.get_instance_async(
                 InjectionKey(VpcAddress, _ready=False)))
         return results
-        
+
     def find_from_id(self):
         try:
             r = self.connection.client.describe_nat_gateways(NatGatewayIds=[self.id])
-        except ClientError: return
+        except ClientError:
+            return
         gateways = r['NatGateways']
         for g in gateways:
             if g['State'] == 'deleted':
@@ -762,7 +838,10 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
                 vpc_address = await self.ainjector.get_instance_async(VpcAddress)
                 link.vpc_address_allocation = vpc_address.id
             else:
-                raise ValueError('AwsNatGateway must either be connectivity_type private, or have a VpcAddress either as the public_address of the link, or directly in the injector of the nat gateway.')
+                raise ValueError(
+                    'AwsNatGateway must either be connectivity_type private, or have a VpcAddress'
+                    ' either as the public_address of the link, or directly in the injector of the nat gateway.'
+                )
         self.subnet = link.net_instance
         self.link = link
 
@@ -780,14 +859,15 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
         self.id = r['NatGateway']['NatGatewayId']
 
     async def post_find_hook(self):
-        try: await wait_for_state_change(
+        try:
+            await wait_for_state_change(
                 self, lambda obj: obj.mob['State'],
                 'available', ['pending'])
         finally:
             if self.mob['State'] == 'failed':
-                logger.error(f'{self} failed: {self.mob["FailureMessage"]}')
+                logger.error('%s failed: %s', self, self.mob["FailureMessage"])
                 if not self.readonly:
-                    logger.info(f'Deleting failed NAT gateway {self}')
+                    logger.info('Deleting failed NAT gateway %s', self)
                     await self.delete()
                     raise RuntimeError(f'{self} failed: {self.mob["FailureMessage"]}')
 
@@ -796,7 +876,8 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
             self.connection.client.delete_nat_gateway(
                 NatGatewayId=self.id)
         await self.find()
-        if not self.mob: return
+        if not self.mob:
+            return
         logger.info('Deleting NAT Gateway %s', self.id)
         await run_in_executor(callback)
         await wait_for_state_change(
@@ -811,8 +892,9 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
                 if not vpc_address:
                     vpc_address = await self.ainjector.get_instance_async(InjectionKey(VpcAddress, _ready=False))
                     await vpc_address.find()
-                if vpc_address.mob: await vpc_address.delete()
-            except Exception as e:
-                logger.exception(f'Deleting VPCAddress for {self}')
+                if vpc_address.mob:
+                    await vpc_address.delete()
+            except Exception:
+                logger.exception('Deleting VPCAddress for %s', self)
 
 __all__ += ['AwsNatGateway']

@@ -1,0 +1,21 @@
+name: Pylint
+on:
+  push: {}
+  schedule:
+    - cron: '42 12 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: install dependencies
+        run: |
+          podman pull ghcr.io/hadron/carthage:latest
+          podman run -v`pwd`:/carthage_aws -d --name carthage --privileged --device=/dev/fuse carthage:latest
+          podman exec carthage apt update
+          podman exec carthage apt -y install python3-pytest python3-boto3 pylint
+
+      - name: run pylint
+        run: |
+          podman exec -ti -w/carthage_aws carthage pylint $(git ls-files '*.py') 

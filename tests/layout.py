@@ -6,14 +6,16 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
 import os
-from pathlib import Path
+
 from carthage import *
-from carthage_aws import *
-from carthage_aws.dns import AwsPrivateHostedZone
-from carthage_base import CarthageServerRole, DebianImage
 from carthage.modeling import *
 from carthage.cloud_init import WriteAuthorizedKeysPlugin
 from carthage.dns import *
+
+from carthage_base import CarthageServerRole, DebianImage
+
+from carthage_aws import *
+from carthage_aws.dns import AwsPrivateHostedZone
 
 class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
 
@@ -27,11 +29,11 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
 
         name = 'autotest.photon.ac'
         add_provider(destroy_policy, DeletionPolicy.retain)
-    
+
     @provides(InjectionKey(DnsZone, role="private_zone"))
     class autotest_photon_local(AwsPrivateHostedZone, InjectableModel):
         name = "autotest.photon.local"
-    
+
 
     add_provider(WriteAuthorizedKeysPlugin, allow_multiple=True)
     #aws_key_name = 'main'
@@ -41,7 +43,7 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
     class our_net(NetworkModel):
         v4_config = V4Config(network="192.168.100.0/24")
         aws_security_groups = ['all_open']
-        
+
 
     class all_open(AwsSecurityGroup):
         ingress_rules = [SgRule(
@@ -56,7 +58,7 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
         name = "private-vm"
         cloud_init = True
         aws_instance_type = "t2.micro"
-        
+
         class net_config(NetworkConfigModel):
             add('eth0', mac=None, net=InjectionKey("our_net"))
 
@@ -82,7 +84,7 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
 
     class does_not_exist(MachineModel):
         aws_readonly = True
-        
+
     class some_volume(AwsVolume):
         volume_size = 4
         aws_availability_zone = 'us-east-1a'
@@ -93,7 +95,7 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
         class volume(AwsVolume):
             volume_size = 4
             name = "attach_me"
-            
+
 
     # The layout already has AnsibleModelMixin, but this will force a
     # new inventory generation when image_builder is built.
@@ -130,7 +132,7 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
                          # isolate the one to which vms are connected
                          # to from the one to which tests for sg
                          # creation and deletion are made.
-                         
+
         name = 'all_access'
 
         ingress_rules = [SgRule(
@@ -138,14 +140,14 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
             cidr='0.0.0.0/0',
             port=-1,
             proto=-1)]
-        
+
 
     class no_access(AwsSecurityGroup):
         name = 'no_access'
         ingress_rules = []
         egress_rules = []
 
-    
+
     class ip_1(VpcAddress):
         name = 'address_1'
 
@@ -156,5 +158,3 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
             add('eth0', mac=None,
                     net=InjectionKey("our_net"),
                 v4_config=V4Config(public_address=injector_access(ip_1)))
-
-        

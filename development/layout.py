@@ -7,13 +7,15 @@
 # LICENSE for details.
 import os.path
 import carthage.ssh
+
 from carthage import *
-from carthage_aws import *
-from carthage_aws.connection import run_in_executor
-from carthage_base import *
-from carthage_base.proxy import *
 from carthage.modeling import *
 from carthage.cloud_init import WriteAuthorizedKeysPlugin
+
+from carthage_base import *
+from carthage_base.proxy import *
+
+from carthage_aws import *
 
 class CarthageViewerSupport(ProxyServerRole, CertbotCertRole, ProxyServiceRole):
 
@@ -33,7 +35,7 @@ class CarthageViewerSupport(ProxyServerRole, CertbotCertRole, ProxyServiceRole):
 @inject(injector=Injector)
 async def dev_layout(injector):
     ainjector = injector(AsyncInjector)
-    
+
     class layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
 
         layout_name = 'aws_development'
@@ -52,13 +54,13 @@ async def dev_layout(injector):
                 SgRule(cidr='0.0.0.0/0', port=80),
                 )
             name = 'dev'
-            
+
         async def register_carthage_debian(self):
             await self.ainjector(
                 build_ami,
                 name="Carthage-Debian",
                 add_time_to_name=True)
-            
+
         add_provider(DebianImage)
         add_provider(machine_implementation_key, MaybeLocalAwsVm)
         add_provider(InjectionKey(DnsZone, name=config.developer.domain, addressing='public'),
@@ -67,7 +69,7 @@ async def dev_layout(injector):
         add_provider(InjectionKey("aws_ami"),
                      image_provider(name='Carthage-Debian*',
                                     fallback=image_provider(owner=debian_ami_owner, name='debian-12-amd64-*')))
-        
+
 
         class our_net(NetworkModel):
             v4_config = V4Config(network="192.168.100.0/24")
@@ -90,16 +92,16 @@ async def dev_layout(injector):
             aws_image_size = 20
             if config.developer.iam_profile:
                 aws_iam_profile = config.developer.iam_profile
-            
+
             class install_software(MachineCustomization):
                 @setup_task("Install useful software")
                 async def install(self):
                     await self.ssh("apt -y install emacs-nox mailutils- python3-boto3 podman containers-storage",
                                    _bg=True,
                                    _bg_exc=False)
-            
 
-                    
+
+
         class other(MachineModel):
             cloud_init = True
             aws_instance_type = 't3.micro'

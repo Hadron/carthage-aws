@@ -5,15 +5,16 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
-import asyncio, logging
-from attr import Attribute
+import asyncio
 
 import pytest
+
 from carthage import *
-from carthage_aws import *
 from carthage.modeling import *
 from carthage.pytest import *
 from carthage.network import this_network
+
+from carthage_aws import *
 
 @async_test
 async def test_base_vm(carthage_layout):
@@ -25,21 +26,23 @@ async def test_base_vm(carthage_layout):
         await layout.test_vm.machine.is_machine_running()
         await layout.test_vm.machine.ssh_online()
     finally:
-        try: layout.test_vm.machine.mob.terminate()
-        except Exception: pass
+        try:
+            layout.test_vm.machine.mob.terminate()
+        except Exception:
+            pass
 
 @async_test
 async def test_record_private_zone(carthage_layout):
     layout = carthage_layout
     zone = await layout.ainjector.get_instance_async('autotest_photon_local')
-    con = await layout.ainjector.get_instance_async(AwsConnection)
+    await layout.ainjector.get_instance_async(AwsConnection)
     try:
         await zone.update_records(
             *[('autotest.photon.local', 'TXT', '"This is a test"'),]
         )
     except Exception as e:
         logger.error(e)
-        raise Exception("Failed to update update_records")
+        raise Exception("Failed to update update_records") from e # pylint: disable=broad-exception-raised
 
     instance =  layout.test_private_vm
     await instance.machine.start_machine()
@@ -65,37 +68,42 @@ async def test_read_only(carthage_layout):
     await layout.ainjector.get_instance_async(AwsConnection)
     with pytest.raises(LookupError):
         await layout.does_not_exist.machine.async_become_ready()
-        
+
 @async_test
 async def test_create_volume(carthage_layout):
     layout = carthage_layout
-    con = await layout.ainjector.get_instance_async(AwsConnection)
+    await layout.ainjector.get_instance_async(AwsConnection)
     vol = None
     try:
         vol = await layout.ainjector.get_instance_async('some_volume')
     finally:
-        if vol: await vol.delete()
+        if vol:
+            await vol.delete()
 
 @async_test
 async def test_attach_volume(carthage_layout):
     layout = carthage_layout
-    con = await layout.ainjector.get_instance_async(AwsConnection)
+    await layout.ainjector.get_instance_async(AwsConnection)
     vol = None
     try:
         instance =  layout.instance_for_volume
         await instance.machine.async_become_ready()
-        instance.injector.add_provider(InjectionKey('aws_availability_zone'), instance.machine.mob.placement['AvailabilityZone'])
+        instance.injector.add_provider(
+            InjectionKey('aws_availability_zone'),
+            instance.machine.mob.placement['AvailabilityZone']
+        )
         vol = await instance.ainjector.get_instance_async('volume')
         await vol.attach(instance=instance, device="xvdi")
         vol = None
     finally:
-        if vol: await vol.delete()
-        await         instance.machine.delete()
+        if vol:
+            await vol.delete()
+        await instance.machine.delete()
 
 @async_test
 async def test_start_machine(carthage_layout):
     layout = carthage_layout
-    con = await layout.ainjector.get_instance_async(AwsConnection)
+    await layout.ainjector.get_instance_async(AwsConnection)
     try:
         instance =  layout.test_no_ready
         await instance.machine.start_machine()
@@ -105,7 +113,7 @@ async def test_start_machine(carthage_layout):
 @async_test
 async def test_image_building(carthage_layout, request):
     layout = carthage_layout
-    con = await layout.ainjector.get_instance_async(AwsConnection)
+    await layout.ainjector.get_instance_async(AwsConnection)
     try:
         instance =  layout.image_builder
         with TestTiming(2000):
@@ -121,14 +129,14 @@ async def test_image_building(carthage_layout, request):
                  "/carthage_aws/tests/inner_image_builder.py"],
                 python_path="/carthage:/carthage_aws",
                 ssh_agent=True)
-        
+
     finally:
         await instance.machine.delete()
 
 @async_test
 async def test_security_groups(carthage_layout):
     layout = carthage_layout
-    con = await layout.ainjector.get_instance_async(AwsConnection)
+    await layout.ainjector.get_instance_async(AwsConnection)
     await layout.all_access.async_become_ready()
     try:
         assert set(layout.all_access.ingress_rules) == layout.all_access.existing_ingress
@@ -143,7 +151,7 @@ async def test_security_groups(carthage_layout):
 @async_test
 async def test_elastic_ip(carthage_layout):
     layout = carthage_layout
-    con = await layout.ainjector.get_instance_async(AwsConnection)
+    await layout.ainjector.get_instance_async(AwsConnection)
     await layout.ip_1.async_become_ready()
     try:
         assert layout.ip_1.ip_address
@@ -155,7 +163,7 @@ async def test_elastic_ip(carthage_layout):
             with TestTiming(2000):
                 await layout.ip_test.machine.delete()
         await layout.ip_1.delete()
-    
+
 @async_test
 async def test_aws_subnet_create(ainjector):
     '''
@@ -168,7 +176,7 @@ async def test_aws_subnet_create(ainjector):
 
         class route_table(AwsRouteTable):
             name = 'test_route_table'
-            
+
         class igw(AwsInternetGateway):
 
             name = 'test_igw'
@@ -195,11 +203,11 @@ async def test_aws_subnet_create(ainjector):
     try:
         ainjector.add_provider(creation_vpc)
         vpc = None
-        private_subnet = None
         try:
             vpc_to_cleanup = await ainjector(creation_vpc, readonly=True)
             await vpc_to_cleanup.ainjector(run_deployment_destroy)
-        except LookupError: pass
+        except LookupError:
+            pass
         vpc = await ainjector.get_instance_async(creation_vpc)
         with instantiation_not_ready():
             with TestTiming(2000):
@@ -208,12 +216,11 @@ async def test_aws_subnet_create(ainjector):
         assert not subnet.mob
         await subnet.async_become_ready()
         assert subnet.mob
-        assert subnet.mob.availability_zone == subnet._gfi("aws_availability_zone")
+        assert subnet.mob.availability_zone == subnet._gfi("aws_availability_zone") # pylint: disable=protected-access
         result =  vpc.mob.describe_attribute(Attribute="enableDnsHostnames")
         assert result["EnableDnsHostnames"]["Value"] == True
         with TestTiming(2000):
-            private_subnet = await vpc.private_subnet.access_by(AwsSubnet)
+            await vpc.private_subnet.access_by(AwsSubnet)
     finally:
         with TestTiming(2000):
             print(await vpc.ainjector(run_deployment_destroy))
-            

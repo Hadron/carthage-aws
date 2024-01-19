@@ -8,8 +8,6 @@
 from pathlib import Path
 
 import asyncio
-import functools
-import logging
 import os
 
 import carthage.network
@@ -28,7 +26,7 @@ __all__ = ['AwsConnection', 'AwsManaged']
 
 async def run_in_executor(func, *args):
     return await asyncio.get_event_loop().run_in_executor(None, func, *args)
-    
+
 @inject_autokwargs(config_layout=ConfigLayout)
 class AwsConnection(AsyncInjectable):
 
@@ -36,6 +34,15 @@ class AwsConnection(AsyncInjectable):
         super().__init__(**kwargs)
         self.config = self.config_layout.aws
         self.connection = None
+        self.region = None
+        self.client = None
+        self.keys = []
+        self.vpcs = []
+        self.igs = []
+        self.subnets = []
+        self.groups = []
+        self.run_vpc = None
+        self.names_by_resource_type = {}
 
 
     async def inventory(self):
@@ -48,28 +55,21 @@ class AwsConnection(AsyncInjectable):
         )
         self.region = self.config.region
         self.client = self.connection.client('ec2', region_name=self.region)
-        self.keys = []
         for key in self.client.describe_key_pairs()['KeyPairs']:
             self.keys.append(key['KeyName'])
-        self.vpcs = []
-        self.igs = []
-        self.subnets = []
-        self.groups = []
-        self.run_vpc = None
         self._inventory()
 
     def _inventory(self):
         # Executor context
-        self.names_by_resource_type = {}
         nbrt = self.names_by_resource_type
-        r = self.client.describe_tags(Filters=[dict(Name='key', Values=['Name'])])
+        r = self.client.describe_tags(Filters=[{'Name':'key', 'Values':['Name']}])
         for resource in r['Tags']:
             rt, rv = resource['ResourceType'], resource['Value']
             rt = rt.replace('-','_')
             nbrt.setdefault(rt, {})
             nbrt[rt].setdefault(rv, [])
             nbrt[rt][rv].append(resource)
-            
+
         r = self.client.describe_vpcs()
         for v in r['Vpcs']:
             vpc = {'id': v['VpcId']}
@@ -81,7 +81,7 @@ class AwsConnection(AsyncInjectable):
             self.vpcs.append(vpc)
             if (self.config.vpc_id != None or self.config.vpc_id != '') and vpc['id'] == self.config.vpc_id:
                 self.run_vpc = vpc
-            elif (self.config.vpc_id == None or self.config.vpc_id == '') and 'Tags' in v:
+            elif (self.config.vpc_id in (None, '')) and 'Tags' in v:
                 for t in v['Tags']:
                     if t['Key'] == 'Name' and t['Value'] == self.config.vpc_name:
                         self.run_vpc = vpc
@@ -103,7 +103,7 @@ class AwsConnection(AsyncInjectable):
             subnet = {'CidrBlock': s['CidrBlock'], 'id': s['SubnetId'], 'vpc': s['VpcId']}
             self.subnets.append(subnet)
 
-    
+
     def set_running_vpc(self, vpc):
         for v in self.vpcs:
             if v['id'] == vpc:
@@ -113,20 +113,20 @@ class AwsConnection(AsyncInjectable):
         await run_in_executor(self._setup)
         return await super().async_ready()
 
-    def invalid_ec2_resource(self, resource_type, id, *, name=None):
-        '''Indicate that a given resource does not (and will not) exist.
-Clean it out of our caches and untag it.
-Run in executor context.
-'''
+    def invalid_ec2_resource(self, resource_type, resource_id, *, name=None):
+        '''
+        Indicate that a given resource does not (and will not) exist.
+        Clean it out of our caches and untag it.
+        Run in executor context.
+        '''
         if name:
             names = self.names_by_resource_type.get(resource_type)
             if names and name in names:
                 names[name] = list(filter(
-                    lambda r: r['ResourceId'] != id, names[name]))
+                    lambda r: r['ResourceId'] != resource_id, names[name]))
 
-        self.client.delete_tags(Resources=[id])
-        
-            
+        self.client.delete_tags(Resources=[resource_id])
+
 
 @inject_autokwargs(config_layout=ConfigLayout,
                    connection=InjectionKey(AwsConnection, _ready=True),
@@ -140,12 +140,15 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
     id = None
 
     def __init__(self, *, name=None, **kwargs):
-        if name and self.pass_name_to_super: kwargs['name'] = name
-        if name: self.name = name
+        if name and self.pass_name_to_super:
+            kwargs['name'] = name
+        if name:
+            self.name = name
         super().__init__(**kwargs)
-        if not self.readonly: self.readonly = bool(self.id)
+        if not self.readonly: # pylint: disable=access-member-before-definition
+            self.readonly = bool(self.id)
         self.mob = None
-        
+
 
     @memoproperty
     def stamp_type(self):
@@ -165,10 +168,12 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
     def resource_tags(self):
         tags = []
         if self.name:
-            tags.append(dict(Key="Name", Value=self.name))
-        return dict(ResourceType=self.resource_type.replace('_','-'),
-                    Tags=tags)
-    
+            tags.append({"Key":"Name", "Value":self.name})
+        return {
+            "ResourceType":self.resource_type.replace('_','-'),
+            "Tags":tags
+        }
+
     def find_from_id(self):
         #called in executor context; create a mob from id
         assert self.id
@@ -178,27 +183,27 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             self.mob.load()
         except ClientError as e:
             if hasattr(self.mob, 'wait_until_exists'):
-                logger.info(f'Waiting for {repr(self.mob)} to exist')
+                logger.info('Waiting for %s to exist', repr(self.mob))
                 self.mob.wait_until_exists()
                 self.mob.load()
             else:
-                logger.warning(f'Failed to load {self}', exc_info=e)
+                logger.warning('Failed to load %s', self, exc_info=e)
                 self.mob = None
                 if not self.readonly:
                     self.connection.invalid_ec2_resource(self.resource_type, self.id, name=self.name)
-                return
         return self.mob
 
 
     async def find(self):
-        '''Find ourself from a name or id
-'''
+        '''
+        Find ourself from a name or id
+        '''
         if self.id:
             return await run_in_executor(self.find_from_id)
-        elif self.name:
-            for id in await self.possible_ids_for_name():
+        if self.name:
+            for resource_id in await self.possible_ids_for_name():
                 # use the first viable
-                self.id = id
+                self.id = resource_id
                 await run_in_executor(self.find_from_id)
                 if self.mob:
                     return
@@ -206,8 +211,10 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
 
     async def possible_ids_for_name(self):
         resource_type = self.resource_type
-        try: names = self.connection.names_by_resource_type[resource_type]
-        except KeyError: return []
+        try:
+            names = self.connection.names_by_resource_type[resource_type]
+        except KeyError:
+            return []
         if self.name in names:
             objs = names[self.name]
             return [obj['ResourceId'] for obj in objs]
@@ -216,8 +223,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
     def __repr__(self):
         if self.name:
             return f'<{self.__class__.__name__} ({self.name}) at 0x{id(self):0x}>'
-        else:
-            return f'<anonymous {self.__class__.__name__} at 0x{id(self):0x}>'
+        return f'<anonymous {self.__class__.__name__} at 0x{id(self):0x}>'
 
     def __str__(self):
         try:
@@ -227,12 +233,11 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             elif self.id:
                 result += self.id
             return result
-        except Exception:
+        except Exception: # pylint: disable=broad-except
             return super().__str__()
-    
-            
+
     @setup_task("construct", order=700)
-    async def find_or_create(self):
+    async def find_or_create(self): #type: ignore
 
         if self.mob:
             return
@@ -244,7 +249,8 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         await self.find()
 
         if self.mob:
-            if not self.readonly: await self.ainjector(self.read_write_hook)
+            if not self.readonly:
+                await self.ainjector(self.read_write_hook)
             await self.ainjector(self.post_find_hook)
             return
 
@@ -270,10 +276,12 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         return self.mob
 
     @find_or_create.check_completed()
+    # pylint: disable=function-redefined
     async def find_or_create(self):
         await self.find()
         if self.mob:
-            if not self.readonly: await self.ainjector(self.read_write_hook)
+            if not self.readonly:
+                await self.ainjector(self.read_write_hook)
             await self.ainjector(self.post_find_hook)
             return True
         return False
@@ -281,34 +289,51 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
     def _gfi(self, key, default="error"):
         '''
         get_from_injector.  Used to look up some configuration in the model or its enclosing injectors.
-    '''
-        k = InjectionKey(key, _optional=( default != "error"))
+        '''
+        k = InjectionKey(key, _optional=default != "error")
         res = self.injector.get_instance(k)
-        if res is None and default != "error": res = default
+        if res is None and default != "error":
+            res = default
         return res
-    
+
     def do_create(self):
-        '''Run in executor context.  Do the actual creation.  Cannot do async things.  Do any necessary async work in pre_create_hook.'''
+        '''
+        Run in executor context.  Do the actual creation.  Cannot do async things.
+        Do any necessary async work in pre_create_hook.
+        '''
         raise NotImplementedError
 
     async def pre_create_hook(self):
-        '''Any async tasks that need to be performed before do_create is called in executor context.  May have injected dependencies.'''
-        pass
+        '''
+        Any async tasks that need to be performed before do_create is called in executor context.
+        May have injected dependencies.
+        '''
 
     async def post_create_hook(self):
-        '''Any tasks that should be performed in async context after creation.  May have injected dependencies.'''
-        pass
+        '''
+        Any tasks that should be performed in async context after creation.
+        May have injected dependencies.
+        '''
 
     async def post_find_hook(self):
-        '''Any tasks performed in async context after an object is found or created.  May have injected dependencies.  If you need to perform tasks before find, simply override :meth:`find`.  This hook MUST NOT modify the object if self.readonly is True.  In general, any tasks that may modify the object should be run in :meth:`read_write_hook` which runs before *post_find_hook*.'''
-        pass
-    
+        '''
+        Any tasks performed in async context after an object is found or created.
+        May have injected dependencies.  If you need to perform tasks before find,
+        simply override :meth:`find`.
+        This hook MUST NOT modify the object if self.readonly is True.
+
+        In general, any tasks that may modify the object should be run in
+        :meth:`read_write_hook` which runs before *post_find_hook*.
+        '''
+
     async def read_write_hook(self):
         '''
-        A hook for performing tasks that may modify the state of an object such as reconciling expected configuration with actual configuration.  Called before :meth:`post_find_hook` when an object is found or created, but only when *readonly* is not true.
+        A hook for performing tasks that may modify the state of an
+        object such as reconciling expected configuration with actual configuration.
+        Called before :meth:`post_find_hook` when an object is found or created,
+        but only when *readonly* is not true.
         '''
-        pass
-    
+
 
     @memoproperty
     def stamp_path(self):
@@ -320,29 +345,37 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
     async def dynamic_dependencies(self):
         # for Deployable interface
         return []
-    
 
-    def aws_propagate_key(cls):
+
+    def aws_propagate_key(cls): #type: ignore pylint: disable=no-self-argument
         '''
-        Returns an :class:`InjectionKey`  that will :func:`propagate up <carthage.modeling.propagate_key>` so that :mod:`deployment <carthage.deployment>` can find the deployable.
+        Returns an :class:`InjectionKey`  that will
+        :func:`propagate up <carthage.modeling.propagate_key>` so that
+        :mod:`deployment <carthage.deployment>` can find the deployable.
 
-        Note that this method is sometimes called as if it were a class method although it must not be declared as such.  That is, sometimes *cls* is a class and sometimes an instance:
+        Note that this method is sometimes called as if it were a class method although
+        it must not be declared as such.  That is, sometimes *cls* is a class and
+        sometimes an instance:
 
-        * called  as ``cls.aws_propagate_key(cls)`` in :meth:`default_class_injection_key` and :meth:`__init_subclass__`.
+        * called  as ``cls.aws_propagate_key(cls)`` in :meth:`default_class_injection_key`
+          and :meth:`__init_subclass__`.
 
         * called with an instance in :meth:`default_instance_injection_key`.
 
-        This method can raise *AttributeError* if it is unable to determine the key to propagate, for example if ``cls.name`` is None.
+        This method can raise *AttributeError* if it is unable to determine the key to
+        propagate, for example if ``cls.name`` is None.
         This method should be overridden in subclasses if the default is not correct.
         '''
-        if cls.name is None: raise AttributeError('Name not yet set')
+        if cls.name is None:
+            raise AttributeError('Name not yet set')
         constraint = {cls.resource_type+'_name':cls.name}
         target = aws_type_registry[cls.resource_type]
         return InjectionKey(target, **constraint)
 
     @classmethod
     def default_class_injection_key(cls):
-        try: return cls.aws_propagate_key(cls)
+        try:
+            return cls.aws_propagate_key(cls)
         except AttributeError:
             return super().default_class_injection_key()
 
@@ -355,17 +388,21 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             aws_type_registry[cls.resource_type] = cls
         try:
             propagate_key(cls.aws_propagate_key(cls), cls)
-        except AttributeError: pass
-        
+        except AttributeError:
+            pass
+
 
 
 async def wait_for_state_change(obj, get_state_func, desired_state:str, wait_states: list[str]):
     '''
-    Wait for a state transition, generally for objects without a boto3 resource implementation.  So *get_state_func* typically decomposes whatever :meth:``find_from_id` puts in *mob*.
+    Wait for a state transition, generally for objects without a boto3 resource implementation.
+    So *get_state_func* typically decomposes whatever :meth:``find_from_id` puts in *mob*.
 
-    :param obj: An :class:`AwsManaged` implementing *find_from_id* which we will use as a reload function.
+    :param obj: An :class:`AwsManaged` implementing *find_from_id* which we will use as a
+    reload function.
 
-    :param get_state_func: A function to get the current state from *mob*, possibly something like `lambda obj:obj.mob['State']`
+    :param get_state_func: A function to get the current state from *mob*, possibly
+    something like `lambda obj:obj.mob['State']`
 
     :param desired_state: The state that counts as success.
 
@@ -376,36 +413,40 @@ async def wait_for_state_change(obj, get_state_func, desired_state:str, wait_sta
     state = get_state_func(obj)
     logged = False
     while timeout > 0:
-        if state == desired_state: return
+        if state == desired_state:
+            return
         if state not in wait_states:
             raise RuntimeError(f'Unexpected state for {obj}: {state}')
         if not logged:
-            logger.info(f'Waiting for {obj} to enter {desired_state} state')
+            logger.info('Waiting for %s to enter %s state', obj, desired_state)
             logged=True
         await asyncio.sleep(5)
         timeout -= 5
         await run_in_executor(obj.find_from_id)
         state = get_state_func(obj)
     raise RuntimeError(f'{obj}: {state=} is not desired state {desired_state}')
-        
-class AwsDeployableFinder(DeployableFinder):
 
+class AwsDeployableFinder(DeployableFinder):
     '''
-    Find any :class:`AwsManaged`.  Also, for any VPC, explicitly instantiate any networks contained within the VPC as an AwsSubnet.
+    Find any :class:`AwsManaged`.  Also, for any VPC, explicitly instantiate any networks
+    contained within the VPC as an AwsSubnet.
     '''
 
     name = 'aws'
 
-    
     async def find(self, ainjector):
-        from .network import AwsVirtualPrivateCloud, AwsSubnet
+        from .network import AwsVirtualPrivateCloud, AwsSubnet # pylint: disable=relative-beyond-top-level,import-outside-toplevel
         subnets = []
         # Instantiating allow_multiple keys like AwsSubnet with
         # filter_instantiate almost certainly leads to Deployable
         # duplication, so don't.
         results = await ainjector.filter_instantiate_async(
-            None, lambda k: isinstance(k.target, type) and issubclass(k.target, AwsManaged) and not issubclass(k.target, AwsSubnet),
-            ready=False, stop_at=ainjector)
+            None,
+            lambda k:
+                isinstance(k.target, type) and issubclass(k.target, AwsManaged) and not issubclass(k.target, AwsSubnet),
+            ready=False,
+            stop_at=ainjector
+        )
         for _, obj in results:
             if isinstance(obj,AwsVirtualPrivateCloud):
                 networks = await obj.ainjector.filter_instantiate_async(

@@ -16,7 +16,10 @@ __all__ = []
 from .connection import AwsConnection
 __all__ += ['AwsConnection']
 
-from .network import AwsVirtualPrivateCloud, AwsSubnet, SgRule, AwsSecurityGroup, VpcAddress, network_for_existing_vm, AwsRouteTable, AwsInternetGateway, AwsNatGateway
+from .network import (
+    AwsVirtualPrivateCloud, AwsSubnet, SgRule, AwsSecurityGroup, VpcAddress,
+    network_for_existing_vm, AwsRouteTable, AwsInternetGateway, AwsNatGateway
+)
 __all__ += ['AwsVirtualPrivateCloud', 'AwsSubnet',
             'AwsSecurityGroup', 'SgRule',
             'VpcAddress', 'network_for_existing_vm',
@@ -28,8 +31,14 @@ __all__ += ['AwsHostedZone', 'AwsPrivateHostedZone', 'AwsDnsManagement']
 from .vm import AwsVm, MaybeLocalAwsVm
 __all__ += ['AwsVm', 'MaybeLocalAwsVm']
 
-from .image import AwsImage, image_provider, debian_ami_owner, ImageBuilderVolume, AttachImageBuilderVolume, build_ami
-__all__ += ['AwsImage', 'image_provider', 'debian_ami_owner', 'AttachImageBuilderVolume', 'ImageBuilderVolume', 'build_ami']
+from .image import (
+    AwsImage, image_provider, debian_ami_owner, ImageBuilderVolume,
+    AttachImageBuilderVolume, build_ami
+)
+__all__ += [
+    'AwsImage', 'image_provider', 'debian_ami_owner', 'AttachImageBuilderVolume', 
+    'ImageBuilderVolume', 'build_ami'
+]
 
 from .ebs import AwsVolume, attach_volume_task, AwsSnapshot
 __all__ += ['AwsVolume', 'attach_volume_task', 'AwsSnapshot']
@@ -56,7 +65,7 @@ class AwsConfig(ConfigSchema, prefix = "aws"):
     #: DnsHostnamesEnable setting for VPCs
     # https://docs.aws.amazon.com/vpc/latest/userguide/vpc-dns.html#vpc-dns-support
     vpc_dns_hostnames_enabled: bool = False
-    
+
 
 @inject(injector=Injector)
 def enable_new_aws_connection(injector):
@@ -65,9 +74,10 @@ def enable_new_aws_connection(injector):
 
 @inject(injector=Injector)
 def carthage_plugin(injector):
+    # avoid circular imports
+    # pylint: disable=import-outside-toplevel
     from . import connection
     injector.add_provider(connection.AwsDeployableFinder)
     injector.add_provider(AwsVirtualPrivateCloud)
     injector.add_provider(AwsSubnet, allow_multiple = True)
     injector(enable_new_aws_connection)
-    
