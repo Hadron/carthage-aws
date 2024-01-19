@@ -327,6 +327,10 @@ class AwsVm(AwsManaged, Machine):
             return False
         self.running = self.mob.state['Name'] in ('pending', 'running')
         if self.running:
+            # This needs to happen in a thread which has an asyncio
+            # loop rather than in a executor thread.
+            self.ssh_jump_host
+            self.aws_ip_address_is_private
             await run_in_executor(self._find_ip_address)
         return self.running
 
