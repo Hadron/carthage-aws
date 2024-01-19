@@ -614,7 +614,7 @@ class AwsRouteTable(AwsManaged):
         await run_in_executor(callback)
 
     async def set_routes(self, *routes):
-        def callback(routes): # pylint: disable=unused-argument
+        def callback():
             numlocal = 0
             for r in list(reversed(self.mob.routes)):
                 if r.gateway_id == 'local':
@@ -623,7 +623,7 @@ class AwsRouteTable(AwsManaged):
                     r.delete()
             assert numlocal == 1
             self.mob.load()
-        await run_in_executor(callback, routes)
+        await run_in_executor(callback)
         for v in routes:
             await self.add_route(*v)
         await run_in_executor(self.mob.load)
