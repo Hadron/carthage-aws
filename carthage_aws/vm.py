@@ -366,8 +366,8 @@ class AwsVm(AwsManaged, Machine):
         if self.running:
             # This needs to happen in a thread which has an asyncio
             # loop rather than in a executor thread.
-            self.ssh_jump_host
-            self.aws_ip_address_is_private
+            self.ssh_jump_host # pylint: disable=pointless-statement
+            self.aws_ip_address_is_private # pylint: disable=pointless-statement
             await run_in_executor(self._find_ip_address)
         return self.running
 

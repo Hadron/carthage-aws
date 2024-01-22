@@ -538,7 +538,7 @@ async def network_for_existing_vm(vm, security_groups):
         if vpc:
             add_provider(
                 InjectionKey(AwsVirtualPrivateCloud),
-                injector_xref(InjectionKey(None, AwsVirtualPrivateCloud, id=vpc_id))
+                injector_xref(None, InjectionKey(AwsVirtualPrivateCloud, id=vpc_id))
             )
         else:
             add_provider(InjectionKey(AwsVirtualPrivateCloud),
