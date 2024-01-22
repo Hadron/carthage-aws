@@ -13,10 +13,8 @@ build:
 
 run-pylint: build
 	@if [ -z "$(FILES)" ]; then \
-		echo "Running pylint on all files..."; \
 		podman exec -ti -w /carthage_aws $(CONTAINER_NAME) pylint $(shell git ls-files '*.py'); \
 	else \
-		echo "Running pylint on specified files..."; \
 		podman exec -ti -w /carthage_aws $(CONTAINER_NAME) pylint $(FILES); \
 	fi
 
