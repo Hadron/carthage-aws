@@ -1,4 +1,4 @@
-.PHONY: build run-pylint run-pytest
+.PHONY: build run-pylint run-pytest clean setup-githooks
 GIT_ROOT := $(shell git rev-parse --show-toplevel)
 CONTAINER_NAME := "carthage_aws"
 
@@ -25,3 +25,9 @@ run-pytest: build
 
 clean:
 	podman rm -f $(CONTAINER_NAME)
+
+setup-githooks:
+	@for hook in githooks/*; do \
+		ln -sf ../../$$hook .git/hooks/`basename $$hook`; \
+		echo "Installed $$hook"; \
+	done
