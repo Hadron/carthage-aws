@@ -426,8 +426,10 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
     async def post_find_hook(self):
         '''
         Set v4_config if we do not have one.
+        In this case set readonly because if we are deleted, we would be unable to recreate ourselves next time around.
         '''
         if not hasattr(self.network, 'v4_config'):
+            self.readonly = True
             self.network.v4_config = V4Config(
                 network=self.mob.cidr_block)
 
