@@ -130,7 +130,7 @@ class AwsConnection(AsyncInjectable):
 
 @inject_autokwargs(config_layout=ConfigLayout,
                    connection=InjectionKey(AwsConnection, _ready=True),
-                                      readonly = InjectionKey("aws_readonly", _optional=True),
+                                      readonly = InjectionKey("aws_readonly", _optional=NotPresent),
                    id=InjectionKey("aws_id", _optional=NotPresent),
                    )
 class AwsManaged(SetupTaskMixin, AsyncInjectable):
@@ -138,6 +138,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
     pass_name_to_super = False # True for machines
     name = None
     id = None
+    readonly = None
 
     def __init__(self, *, name=None, **kwargs):
         if name and self.pass_name_to_super:
@@ -145,7 +146,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         if name:
             self.name = name
         super().__init__(**kwargs)
-        if not self.readonly: # pylint: disable=access-member-before-definition
+        if self.readonly is None: # pylint: disable=access-member-before-definition
             self.readonly = bool(self.id)
         self.mob = None
 
