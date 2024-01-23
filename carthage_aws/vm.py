@@ -24,62 +24,62 @@ from carthage.cloud_init import generate_cloud_init_cloud_config
 
 from .connection import AwsConnection, AwsManaged, run_in_executor
 
-__all__ = ['AwsVm']
+__all__ = ["AwsVm"]
+
 
 @inject(
     connection=AwsConnection,
-    ami=InjectionKey('aws_ami'),
+    ami=InjectionKey("aws_ami"),
     model=AbstractMachineModel,
-    volume_type=InjectionKey('aws_volume_type', _optional=True),
-    )
+    volume_type=InjectionKey("aws_volume_type", _optional=True),
+)
 async def generate_block_device_mappings(connection, ami, model, volume_type):
     if volume_type is None:
-        volume_type ='gp2'
-    services =         connection .connection.resource('ec2', region_name=connection.region)
+        volume_type = "gp2"
+    services = connection.connection.resource("ec2", region_name=connection.region)
     ami_image = services.Image(ami)
     mappings = []
     disk_sizes = model.disk_sizes
-    disk_name = '/dev/xvda'
+    disk_name = "/dev/xvda"
     i = 0
     for i, mapping in enumerate(ami_image.block_device_mappings):
         if i >= len(disk_sizes):
             break
-        if 'Ebs' not in mapping:
+        if "Ebs" not in mapping:
             continue
-        if mapping['Ebs']['VolumeSize'] > disk_sizes[i]:
+        if mapping["Ebs"]["VolumeSize"] > disk_sizes[i]:
             warnings.warn(
                 f'{model}: disk size entry {i} size {disk_sizes[i]} less than image size {mapping["Ebs"]["VolumeSize"]}'
             )
             continue
-        disk_name=mapping['DeviceName']
-        mappings.append({
-            "DeviceName":mapping['DeviceName'],
-            "Ebs":{"VolumeSize":disk_sizes[i]}
-        })
+        disk_name = mapping["DeviceName"]
+        mappings.append({"DeviceName": mapping["DeviceName"], "Ebs": {"VolumeSize": disk_sizes[i]}})
     for i, _ in enumerate(disk_sizes):
         if i < len(mappings):
             continue
-        disk_name = disk_name[:-1]+chr(ord(disk_name[-1])+1)
-        mappings.append({
-            "DeviceName":disk_name,
-            "Ebs":{
-                "VolumeSize":disk_sizes[i],
-                "DeleteOnTermination":True,
-                "VolumeType":volume_type
+        disk_name = disk_name[:-1] + chr(ord(disk_name[-1]) + 1)
+        mappings.append(
+            {
+                "DeviceName": disk_name,
+                "Ebs": {
+                    "VolumeSize": disk_sizes[i],
+                    "DeleteOnTermination": True,
+                    "VolumeType": volume_type,
+                },
             }
-        })
+        )
     return mappings
 
 
 @inject(ainjector=AsyncInjector)
-async def find_security_groups(l:NetworkLink,  *, ainjector):
-    desired_groups = getattr(l, 'aws_security_groups', None)
+async def find_security_groups(l: NetworkLink, *, ainjector):
+    desired_groups = getattr(l, "aws_security_groups", None)
     if desired_groups is None:
-        desired_groups = getattr(l.net, 'aws_security_groups', None)
+        desired_groups = getattr(l.net, "aws_security_groups", None)
         if desired_groups is None:
-            desired_groups = l.net.injector.get_instance(InjectionKey('aws_security_groups', _optional=True))
+            desired_groups = l.net.injector.get_instance(InjectionKey("aws_security_groups", _optional=True))
     if desired_groups is None:
-        desired_groups = ['default']
+        desired_groups = ["default"]
 
     if isinstance(desired_groups, str):
         raise ValueError(
@@ -87,7 +87,7 @@ async def find_security_groups(l:NetworkLink,  *, ainjector):
             "It must be an iterable of strings and not of type str."
         )
 
-    groups = {g['GroupName']:g['GroupId'] for g in l.net_instance.vpc.groups}
+    groups = {g["GroupName"]: g["GroupId"] for g in l.net_instance.vpc.groups}
     results = []
     for g in desired_groups:
         assert isinstance(g, str), f"Items in desired_groups must be a string. Got {g!r} instead."
@@ -99,24 +99,22 @@ async def find_security_groups(l:NetworkLink,  *, ainjector):
         elif g in groups:
             results.append(groups[g])
         else:
-            logger.error('%s is an unknown security group for %s', g, l)
+            logger.error("%s is an unknown security group for %s", g, l)
     return results
 
 
-
-@inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True))
+@inject_autokwargs(connection=InjectionKey(AwsConnection, _ready=True))
 class AwsVm(AwsManaged, Machine):
-
     pass_name_to_super = True
 
     @memoproperty
     def aws_ip_address_is_private(self):
-        '''
-        If True, then ip_address will be populated with the private address of the 
+        """
+        If True, then ip_address will be populated with the private address of the
         instance if it is not otherwise set in a subclass or the model.
 
         By default, this is True if :meth:`ssh_jump_host` is set, otherwise False.
-        '''
+        """
         return bool(self.ssh_jump_host)
 
     def __init__(self, name, **kwargs):
@@ -136,20 +134,24 @@ class AwsVm(AwsManaged, Machine):
             for network_link in updated_private_links:
                 self.injector.emit_event(
                     InjectionKey(NetworkLink),
-                    "address", network_link,
-                    addl_keys=[InjectionKey(NetworkLink, host=self.name)])
+                    "address",
+                    network_link,
+                    addl_keys=[InjectionKey(NetworkLink, host=self.name)],
+                )
             for network_link in updated_public_links:
                 self.injector.emit_event(
                     InjectionKey(NetworkLink),
-                    "public_address", network_link,
-                    adl_keys=[InjectionKey(NetworkLink, host=self.name)])
+                    "public_address",
+                    network_link,
+                    adl_keys=[InjectionKey(NetworkLink, host=self.name)],
+                )
 
         updated_public_links = []
         updated_private_links = []
         update_ip_address = False
         if self.__class__.ip_address is Machine.ip_address:
             try:
-                self.ip_address # pylint: disable=pointless-statement
+                self.ip_address  # pylint: disable=pointless-statement
                 update_ip_address = False
             except NotImplementedError:
                 update_ip_address = True
@@ -160,8 +162,9 @@ class AwsVm(AwsManaged, Machine):
         for network_link, interface in zip(local_network_links, self.mob.network_interfaces):
             if network_link.net_instance.mob != interface.subnet:
                 logger.warning(
-                    'Instance %s: network links do not match instance interface for %s',
-                    self.id, network_link.interface
+                    "Instance %s: network links do not match instance interface for %s",
+                    self.id,
+                    network_link.interface,
                 )
                 continue
             private_address = IPv4Address(interface.private_ip_address)
@@ -174,19 +177,21 @@ class AwsVm(AwsManaged, Machine):
             if not interface.association_attribute:
                 continue
             association = interface.association_attribute
-            if not ('PublicIp' in association and association['PublicIp']):
+            if not ("PublicIp" in association and association["PublicIp"]):
                 continue
-            address = IPv4Address(association['PublicIp'])
+            address = IPv4Address(association["PublicIp"])
             if address != network_link.merged_v4_config.public_address:
-                if getattr(network_link,'vpc_address_allocation', None):
+                if getattr(network_link, "vpc_address_allocation", None):
                     # Configured to use a specific elastic address
                     logger.info(
-                        '%s associating elastic IP for %s',
-                        self.id, network_link.merged_v4_config.public_address
+                        "%s associating elastic IP for %s",
+                        self.id,
+                        network_link.merged_v4_config.public_address,
                     )
                     self.connection.client.associate_address(
                         AllocationId=network_link.vpc_address_allocation,
-                        NetworkInterfaceId=interface.id)
+                        NetworkInterfaceId=interface.id,
+                    )
                 else:
                     # public_v4_address being updated from association
                     network_link.merged_v4_config.public_address = address
@@ -203,7 +208,7 @@ class AwsVm(AwsManaged, Machine):
         loop = asyncio.get_event_loop()
         res = await super().find()
         if not (self.network_links or self.mob):
-            raise RuntimeError('AWS instances require a network link to create')
+            raise RuntimeError("AWS instances require a network link to create")
         for l in self.network_links.values():
             futures.append(loop.create_task(l.instantiate(AwsSubnet)))
         await asyncio.gather(*futures)
@@ -211,26 +216,28 @@ class AwsVm(AwsManaged, Machine):
 
     async def pre_create_hook(self):
         # operation lock is held by overriding find_or_create
-        if getattr(self.model, 'cloud_init', False):
+        if getattr(self.model, "cloud_init", False):
             self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
             if self.ssh_online_command == Machine.ssh_online_command:
-                self.ssh_online_command = 'systemctl --wait is-system-running'
-        else: self.cloud_config = None
-        self.image_id = await self.ainjector.get_instance_async('aws_ami')
+                self.ssh_online_command = "systemctl --wait is-system-running"
+        else:
+            self.cloud_config = None
+        self.image_id = await self.ainjector.get_instance_async("aws_ami")
         self.iam_profile = await self.ainjector.get_instance_async(InjectionKey("aws_iam_profile", _optional=True))
         await self.start_dependencies()
         await super().start_machine()
-        if hasattr(self.model, 'disk_sizes'):
+        if hasattr(self.model, "disk_sizes"):
             self.block_device_mappings = await self.ainjector(generate_block_device_mappings)
-        else: self.block_device_mappings = None
+        else:
+            self.block_device_mappings = None
         for l in self.network_links.values():
             if l.local_type:
                 continue
             l.security_group_ids = await self.ainjector(find_security_groups, l)
             if l.merged_v4_config.public_address:
                 from .network import aws_link_handle_eip
-                await aws_link_handle_eip(self, l)
 
+                await aws_link_handle_eip(self, l)
 
     @setup_task("Create VM", order=AwsManaged.find_or_create.order)
     async def find_or_create(self, already_locked=False):
@@ -241,7 +248,6 @@ class AwsVm(AwsManaged, Machine):
 
     find_or_create.check_completed_func = AwsManaged.find_or_create.check_completed_func
 
-
     def do_create(self):
         network_interfaces = []
         device_index = 0
@@ -249,61 +255,60 @@ class AwsVm(AwsManaged, Machine):
             if l.local_type:
                 continue
             d = {
-                'DeviceIndex': device_index,
-                'Description': l.interface,
-                'SubnetId': l.net_instance.id,
+                "DeviceIndex": device_index,
+                "Description": l.interface,
+                "SubnetId": l.net_instance.id,
             }
             if l.merged_v4_config.address:
                 assert l.merged_v4_config.address in l.net.v4_config.network.hosts(), (
                     f"{l.merged_v4_config.address} is not a hostaddr in "
                     f"{l.net.v4_config.network} for host {self.name}"
                 )
-                d['PrivateIpAddress'] = l.merged_v4_config.address.compressed
+                d["PrivateIpAddress"] = l.merged_v4_config.address.compressed
             if len(self.network_links) == 1 or l.merged_v4_config.public_address:
-                d['AssociatePublicIpAddress'] = not l.merged_v4_config.public_address is False
-            if hasattr(l, 'security_group_ids'):
-                d['Groups'] = l.security_group_ids
+                d["AssociatePublicIpAddress"] = not l.merged_v4_config.public_address is False
+            if hasattr(l, "security_group_ids"):
+                d["Groups"] = l.security_group_ids
             network_interfaces.append(d)
             device_index += 1
-
 
         user_data = ""
         if self.cloud_config:
             user_data = "#cloud-config\n"
             user_data += yaml.dump(self.cloud_config.user_data, default_flow_style=False)
 
-        logger.info('Starting %s VM', self.name)
+        logger.info("Starting %s VM", self.name)
 
         try:
             extra = {}
-            key_name = self._gfi('aws_key_name', default=None)
+            key_name = self._gfi("aws_key_name", default=None)
             if key_name:
-                extra['KeyName'] = key_name
+                extra["KeyName"] = key_name
             if self.block_device_mappings:
-                extra['BlockDeviceMappings'] = self.block_device_mappings
+                extra["BlockDeviceMappings"] = self.block_device_mappings
             if self.iam_profile:
-                extra['IamInstanceProfile'] = {"Name":self.iam_profile}
+                extra["IamInstanceProfile"] = {"Name": self.iam_profile}
             r = self.connection.client.run_instances(
                 ImageId=self.image_id,
                 MinCount=1,
                 MaxCount=1,
-                InstanceType=self._gfi('aws_instance_type'),
+                InstanceType=self._gfi("aws_instance_type"),
                 UserData=user_data,
                 NetworkInterfaces=network_interfaces,
                 TagSpecifications=[self.resource_tags],
-                **extra
+                **extra,
             )
-            self.id = r['Instances'][0]['InstanceId']
+            self.id = r["Instances"][0]["InstanceId"]
             return True
         except ClientError as e:
-            logger.error('Could not create AWS VM for %s because %s.', self.model.name, e)
+            logger.error("Could not create AWS VM for %s because %s.", self.model.name, e)
             return False
 
     def find_from_id(self):
         # terminated instances do not count
         super().find_from_id()
         if self.mob:
-            if self.mob.state['Name'] == 'terminated':
+            if self.mob.state["Name"] == "terminated":
                 self.mob = None
                 return
 
@@ -312,15 +317,13 @@ class AwsVm(AwsManaged, Machine):
         return await super().post_find_hook()
 
     async def dynamic_dependencies(self):
-        result =  await NetworkedModel.dynamic_dependencies(self)
+        result = await NetworkedModel.dynamic_dependencies(self)
         # In addition to the AwsSubnets, we need to depend on any
         # security group we use.  It turns out calculating that is
         # harder than I want to spend time on, so as a stop-gap depend
         # on all security groups.
-        result.extend(self.injector.filter(AwsSecurityGroup, ['name']))
+        result.extend(self.injector.filter(AwsSecurityGroup, ["name"]))
         return result
-
-
 
     async def start_machine(self):
         async with self._operation_lock:
@@ -330,17 +333,16 @@ class AwsVm(AwsManaged, Machine):
             await self.start_dependencies()
             await super().start_machine()
             if not self.mob:
-                #presumably create since is_machine_running calls find already
+                # presumably create since is_machine_running calls find already
                 await self.find_or_create(already_locked=True)
                 await self.is_machine_running()
                 if self.running:
                     return
-                logger.info('Starting %s', self.name)
+                logger.info("Starting %s", self.name)
             await run_in_executor(self.mob.start)
             await run_in_executor(self.mob.wait_until_running)
             await self.is_machine_running()
             return True
-
 
     async def stop_machine(self):
         async with self._operation_lock:
@@ -362,12 +364,12 @@ class AwsVm(AwsManaged, Machine):
         if not self.mob:
             self.running = False
             return False
-        self.running = self.mob.state['Name'] in ('pending', 'running')
+        self.running = self.mob.state["Name"] in ("pending", "running")
         if self.running:
             # This needs to happen in a thread which has an asyncio
             # loop rather than in a executor thread.
-            self.ssh_jump_host # pylint: disable=pointless-statement
-            self.aws_ip_address_is_private # pylint: disable=pointless-statement
+            self.ssh_jump_host  # pylint: disable=pointless-statement
+            self.aws_ip_address_is_private  # pylint: disable=pointless-statement
             await run_in_executor(self._find_ip_address)
         return self.running
 
@@ -376,40 +378,46 @@ class AwsVm(AwsManaged, Machine):
         await run_in_executor(self.mob.wait_until_terminated)
 
     async def root_device_and_volume(self):
-        ''':returns: tuple of root device and volume'''
+        """:returns: tuple of root device and volume"""
         from .ebs import AwsVolume
+
         if not self.mob:
             await self.find()
         rootdev = self.mob.root_device_name
         for mapping in self.mob.block_device_mappings:
-            if mapping['DeviceName'] == rootdev:
-                return rootdev, await self.ainjector(
-                    AwsVolume, id=mapping['Ebs']['VolumeId'], readonly=True)
-        raise ValueError('Root device mapping not found')
+            if mapping["DeviceName"] == rootdev:
+                return rootdev, await self.ainjector(AwsVolume, id=mapping["Ebs"]["VolumeId"], readonly=True)
+        raise ValueError("Root device mapping not found")
 
-    stamp_type = 'vm'
-    resource_type = 'instance'
-    resource_factory_method = 'Instance'
+    stamp_type = "vm"
+    resource_type = "instance"
+    resource_factory_method = "Instance"
+
 
 @inject()
-class  LocalAwsVm(LocalMachineMixin, AwsVm):
+class LocalAwsVm(LocalMachineMixin, AwsVm):
     pass
 
-__all__ += ['LocalAwsVm']
+
+__all__ += ["LocalAwsVm"]
 
 try:
     import carthage_base.hosted
+
     class MaybeLocalAwsVm(carthage_base.hosted.BareOrLocal):
         implementation = LocalAwsVm
         remote_implementation = AwsVm
 
 except ImportError:
+
     class MaybeLocalAwsVm(Injectable):
         def __new__(cls, *args, **kwargs):
-            raise NotImplementedError('MaybeLocalAwsVm requires carthage_base available')
+            raise NotImplementedError("MaybeLocalAwsVm requires carthage_base available")
 
-__all__ += ['MaybeLocalAwsVm']
+
+__all__ += ["MaybeLocalAwsVm"]
 
 # At the end so that network can inject an AwsVm
-from .network import  AwsSubnet, AwsSecurityGroup
+from .network import AwsSubnet, AwsSecurityGroup
+
 AwsVm.network_implementation_class = AwsSubnet

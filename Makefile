@@ -18,6 +18,13 @@ run-pylint: build
 		podman exec -ti -w /carthage_aws $(CONTAINER_NAME) pylint $(FILES); \
 	fi
 
+run-black: build
+	@if [ -z "$(FILES)" ]; then \
+		podman exec -ti -w /carthage_aws $(CONTAINER_NAME) black --check -v $(shell git ls-files '*.py'); \
+	else \
+		podman exec -ti -w /carthage_aws $(CONTAINER_NAME) black --check -v $(FILES); \
+	fi
+
 run-pytest: build
 	podman exec -ti -w/carthage_aws $(CONTAINER_NAME) && \
 		pytest-3 -v && \

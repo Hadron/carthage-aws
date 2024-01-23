@@ -16,6 +16,7 @@ from carthage.network import this_network
 
 from carthage_aws import *
 
+
 @async_test
 async def test_base_vm(carthage_layout):
     layout = carthage_layout
@@ -31,20 +32,23 @@ async def test_base_vm(carthage_layout):
         except Exception:
             pass
 
+
 @async_test
 async def test_record_private_zone(carthage_layout):
     layout = carthage_layout
-    zone = await layout.ainjector.get_instance_async('autotest_photon_local')
+    zone = await layout.ainjector.get_instance_async("autotest_photon_local")
     await layout.ainjector.get_instance_async(AwsConnection)
     try:
         await zone.update_records(
-            *[('autotest.photon.local', 'TXT', '"This is a test"'),]
+            *[
+                ("autotest.photon.local", "TXT", '"This is a test"'),
+            ]
         )
     except Exception as e:
         logger.error(e)
-        raise Exception("Failed to update update_records") from e # pylint: disable=broad-exception-raised
+        raise Exception("Failed to update update_records") from e  # pylint: disable=broad-exception-raised
 
-    instance =  layout.test_private_vm
+    instance = layout.test_private_vm
     await instance.machine.start_machine()
     await instance.machine.ssh_online()
     await instance.machine.ssh("apt update && apt install -y dnsutils")
@@ -69,16 +73,18 @@ async def test_read_only(carthage_layout):
     with pytest.raises(LookupError):
         await layout.does_not_exist.machine.async_become_ready()
 
+
 @async_test
 async def test_create_volume(carthage_layout):
     layout = carthage_layout
     await layout.ainjector.get_instance_async(AwsConnection)
     vol = None
     try:
-        vol = await layout.ainjector.get_instance_async('some_volume')
+        vol = await layout.ainjector.get_instance_async("some_volume")
     finally:
         if vol:
             await vol.delete()
+
 
 @async_test
 async def test_attach_volume(carthage_layout):
@@ -86,13 +92,13 @@ async def test_attach_volume(carthage_layout):
     await layout.ainjector.get_instance_async(AwsConnection)
     vol = None
     try:
-        instance =  layout.instance_for_volume
+        instance = layout.instance_for_volume
         await instance.machine.async_become_ready()
         instance.injector.add_provider(
-            InjectionKey('aws_availability_zone'),
-            instance.machine.mob.placement['AvailabilityZone']
+            InjectionKey("aws_availability_zone"),
+            instance.machine.mob.placement["AvailabilityZone"],
         )
-        vol = await instance.ainjector.get_instance_async('volume')
+        vol = await instance.ainjector.get_instance_async("volume")
         await vol.attach(instance=instance, device="xvdi")
         vol = None
     finally:
@@ -100,38 +106,45 @@ async def test_attach_volume(carthage_layout):
             await vol.delete()
         await instance.machine.delete()
 
+
 @async_test
 async def test_start_machine(carthage_layout):
     layout = carthage_layout
     await layout.ainjector.get_instance_async(AwsConnection)
     try:
-        instance =  layout.test_no_ready
+        instance = layout.test_no_ready
         await instance.machine.start_machine()
     finally:
         await instance.machine.delete()
+
 
 @async_test
 async def test_image_building(carthage_layout, request):
     layout = carthage_layout
     await layout.ainjector.get_instance_async(AwsConnection)
     try:
-        instance =  layout.image_builder
+        instance = layout.image_builder
         with TestTiming(2000):
             await instance.async_become_ready()
         with TestTiming(2000):
             await instance.machine.async_become_ready()
-        #instance.machine.ssh('-A', _fg=True)
-        #breakpoint()
+        # instance.machine.ssh('-A', _fg=True)
+        # breakpoint()
         with TestTiming(1500):
             await subtest_controller(
-                request, instance.machine,
-                ["--carthage-config=/carthage_aws/config.yml",
-                 "/carthage_aws/tests/inner_image_builder.py"],
+                request,
+                instance.machine,
+                [
+                    "--carthage-config=/carthage_aws/config.yml",
+                    "/carthage_aws/tests/inner_image_builder.py",
+                ],
                 python_path="/carthage:/carthage_aws",
-                ssh_agent=True)
+                ssh_agent=True,
+            )
 
     finally:
         await instance.machine.delete()
+
 
 @async_test
 async def test_security_groups(carthage_layout):
@@ -148,6 +161,7 @@ async def test_security_groups(carthage_layout):
     finally:
         await layout.no_access.delete()
 
+
 @async_test
 async def test_elastic_ip(carthage_layout):
     layout = carthage_layout
@@ -157,49 +171,53 @@ async def test_elastic_ip(carthage_layout):
         assert layout.ip_1.ip_address
         await layout.ip_test.resolve_networking()
         await layout.ip_test.machine.async_become_ready()
-        assert str(layout.ip_test.network_links['eth0'].merged_v4_config.public_address )== layout.ip_1.ip_address
+        assert str(layout.ip_test.network_links["eth0"].merged_v4_config.public_address) == layout.ip_1.ip_address
     finally:
         if layout.ip_test.machine.mob:
             with TestTiming(2000):
                 await layout.ip_test.machine.delete()
         await layout.ip_1.delete()
 
+
 @async_test
 async def test_aws_subnet_create(ainjector):
-    '''
+    """
     Test creation of a VPC and a subnet
-    '''
+    """
+
     class creation_vpc(AwsVirtualPrivateCloud, InjectableModel):
-        name = 'creation_vpc'
-        vpc_cidr = '10.1.0.0/16'
+        name = "creation_vpc"
+        vpc_cidr = "10.1.0.0/16"
         dns_hostnames_enabled = True
 
         class route_table(AwsRouteTable):
-            name = 'test_route_table'
+            name = "test_route_table"
 
         class igw(AwsInternetGateway):
+            name = "test_igw"
 
-            name = 'test_igw'
-
-
-        @provides(InjectionKey(Network, role='public'))
+        @provides(InjectionKey(Network, role="public"))
         class created_subnet(NetworkModel):
-            v4_config = V4Config(network='10.1.0.0/24')
-            aws_availability_zone = 'us-east-1c'
+            v4_config = V4Config(network="10.1.0.0/24")
+            aws_availability_zone = "us-east-1c"
+
             @propagate_key(InjectionKey("nat_gw", _globally_unique=True))
             class nat_gw(AwsNatGateway):
                 name = "test_nat_gw"
 
                 class net_config(NetworkConfigModel):
-                    add('eth0', mac=None, net=this_network)
+                    add("eth0", mac=None, net=this_network)
+
         class private_subnet(NetworkModel):
-            v4_config = V4Config(network='10.1.1.0/24')
-            aws_availability_zone = 'us-east-1d'
+            v4_config = V4Config(network="10.1.1.0/24")
+            aws_availability_zone = "us-east-1d"
+
             class route_table(AwsRouteTable):
-                name = 'test_private_route_table'
+                name = "test_private_route_table"
                 routes = [
-                    ('0.0.0.0/0', InjectionKey("nat_gw")),
-                    ]
+                    ("0.0.0.0/0", InjectionKey("nat_gw")),
+                ]
+
     try:
         ainjector.add_provider(creation_vpc)
         vpc = None
@@ -216,8 +234,8 @@ async def test_aws_subnet_create(ainjector):
         assert not subnet.mob
         await subnet.async_become_ready()
         assert subnet.mob
-        assert subnet.mob.availability_zone == subnet._gfi("aws_availability_zone") # pylint: disable=protected-access
-        result =  vpc.mob.describe_attribute(Attribute="enableDnsHostnames")
+        assert subnet.mob.availability_zone == subnet._gfi("aws_availability_zone")  # pylint: disable=protected-access
+        result = vpc.mob.describe_attribute(Attribute="enableDnsHostnames")
         assert result["EnableDnsHostnames"]["Value"] == True
         with TestTiming(2000):
             await vpc.private_subnet.access_by(AwsSubnet)
