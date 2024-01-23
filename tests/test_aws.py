@@ -98,7 +98,8 @@ async def test_attach_volume(carthage_layout):
     finally:
         if vol:
             await vol.delete()
-        await instance.machine.delete()
+            with TestTiming(400):
+                await instance.machine.delete()
 
 @async_test
 async def test_start_machine(carthage_layout):
@@ -224,3 +225,20 @@ async def test_aws_subnet_create(ainjector):
     finally:
         with TestTiming(2000):
             print(await vpc.ainjector(run_deployment_destroy))
+
+@async_test
+async def test_network_without_config(carthage_layout):
+    layout = carthage_layout
+    ainjector = layout.ainjector
+    await     layout.our_net.async_become_ready()
+    await layout.our_net.access_by(AwsSubnet)
+    vpc = await ainjector.get_instance_async(AwsVirtualPrivateCloud)
+    await vpc.connection.inventory()
+    class our_net(NetworkModel):
+        name = 'our_net'
+
+    # Create a version of our_net without a v4_config
+    net = await ainjector(our_net)
+    # and access by subnet
+    await net.access_by(AwsSubnet)
+    assert net.v4_config.network == layout.our_net.v4_config.network

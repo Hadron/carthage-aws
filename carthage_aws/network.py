@@ -1,4 +1,4 @@
-# Copyright (C) 2022, 2023, Hadron Industries, Inc.
+# Copyright (C) 2022, 2023, 2024, Hadron Industries, Inc.
 # Carthage is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
 # as published by the Free Software Foundation. It is distributed
@@ -16,7 +16,7 @@ from botocore.exceptions import ClientError
 
 from carthage import *
 from carthage.dependency_injection import *
-from carthage.network import TechnologySpecificNetwork, this_network
+from carthage.network import TechnologySpecificNetwork, this_network, V4Config
 from carthage.modeling import InjectableModel, ModelContainer, provides, no_inject_name
 from carthage.utils import when_needed
 import carthage.machine
@@ -402,18 +402,34 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
         self.name = self.network.name
 
     def __str__(self):
-        return f'AwsSubnet:{self.name} ({self.network.v4_config.network})'
+        try:
+            return f'AwsSubnet:{self.name} ({self.network.v4_config.network})'
+        except AttributeError:
+            return f'AwsSubnet: {self.name}'
 
 
-    async def find(self):
+    async def possible_ids_for_name(self):
+        '''
+        If the network has a v4_config, find based on the cidr
+        block. Otherwise, fallback to finding on name.  Finding based
+        on ID always is tried first.
+        '''
         await self.vpc.async_become_ready()
-        if self.id:
-            return await run_in_executor(self.find_from_id)
+        if not (hasattr(self.network, 'v4_config')
+                and self.network.v4_config.network):
+            return await super().possible_ids_for_name()
         for s in self.connection.subnets:
             if s['vpc'] == self.vpc.id and s['CidrBlock'] == str(self.network.v4_config.network):
-                self.id = s['id']
-                return await run_in_executor(self.find_from_id)
+                return [s['id']]
+        return []
 
+    async def post_find_hook(self):
+        '''
+        Set v4_config if we do not have one.
+        '''
+        if not hasattr(self.network, 'v4_config'):
+            self.network.v4_config = V4Config(
+                network=self.mob.cidr_block)
 
     def do_create(self):
         availability_zone = self._gfi("aws_availability_zone", default=None)
@@ -703,7 +719,7 @@ class AwsInternetGateway(AwsManaged):
         if vpc:
             await vpc.async_become_ready()
 
-	# If they match, we are done.
+        # If they match, we are done.
         if vpc and self.attachment_id and (vpc.id == self.attachment_id):
             return
 
@@ -828,7 +844,7 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
         # self.link; if that becomes inappropriate, then split
         # functionality.
         await self.resolve_networking()
-        if not len(self.network_links) > 0:
+        if len(self.network_links)== 0:
             raise ValueError('At least one link required')
         link = next(iter(self.network_links.values()))
         await link.instantiate(AwsSubnet)
