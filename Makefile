@@ -18,10 +18,22 @@ run-pylint: build
 		podman exec -ti -w /carthage_aws $(CONTAINER_NAME) pylint $(FILES); \
 	fi
 
+pylint:
+	@if command -v pylint > /dev/null 2>&1; then \
+		echo "Running local pylint..."; \
+		if [ -z "$(FILES)" ]; then \
+			pylint -v $(shell git ls-files '*.py'); \
+		else \
+			pylint $(FILES); \
+		fi; \
+	else \
+		echo "Running pylint in Podman..."; \
+		$(MAKE) run-pylint; \
+	fi
+
+
 run-pytest: build
-	podman exec -ti -w/carthage_aws $(CONTAINER_NAME) && \
-		pytest-3 -v && \
-		--carthage-config=.github/${USER}_test_config.yml
+	podman exec -ti -w/carthage_aws $(CONTAINER_NAME) pytest-3 -v --carthage-config=.github/${USER}_test_config.yml
 
 clean:
 	podman rm -f $(CONTAINER_NAME)
