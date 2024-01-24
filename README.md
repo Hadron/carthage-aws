@@ -8,21 +8,24 @@ Development environments can be setup how ever you want.
 To use a virtualenv you can follow these steps:
 
 ```
-$ python -m venv .carthage_aws        # create the virtualenv
-$ source .carthage_aws/bin/activate   # activate the virtualenv
-$ pip install .[dev]                  # install the dependencies
+$ make build-venv # create the VIRTUALENV
+$ source .venv/bin/activate
 ```
 
+Once your venv is activated you can use the make targets.
+
 If you prefer to install the project requirements system wide you can do that. 
-Please refer to the [pyproject.toml](pyproject.toml) here you can see a list of the 
-required dependencies.
+
+```
+$ pip install -e .[dev]
+```
 
 Depending on your OS you might receive an error when trying to `pip install` a package. In this case
 you will likely have to use the `--break-system-packages` flag which will allow you to use the system 
 python's `pip` command to install packages into python system wide. 
 
 ```
-$ pip install boto3 carthage pylint black --break-system-packages
+$ pip install -e .[dev] --break-system-packages
 ```
 
 You can also install packages using OS distributions. Major OS's will package up python dependencies
@@ -33,6 +36,17 @@ $ sudo apt install python3-boto3 pylint black python3-pytest
 ```
 
 Finally you can use the podman container. For more information look at the [`Makefile`](Makefile).
+
+```
+$ make build-container
+$ podman exec carthage_aws make quality
+```
+
+## Make Targets
+
+* quality: Check the code against pylint.  It should be clean before commits
+* check: Run tests against the code.
+
 
 
 ## Githooks
@@ -59,10 +73,13 @@ likely want to install pylint locally.
 ## Tests
 
 To run the tests you'll need an AWS account. 
-You'll also want to copy the `.github/test_config.yml` to something like `.github/$USER_test_config.ym`and then update the test_config to use your AWS SSO credentials. 
+
+Take a look at the Makefile to see how to use an API key.  Typically
+for individual developers running tests, set up a profile using `aws
+configure sso` and then set your profile name in the
+`CARTHAGE_TEST_AWS_PROFILE` environment variable.
 
 Before you run the tests ensure you've logged in using `aws sso login --profile <profile-name>`
 
-Then you can run the tests either inside the container using the make command. 
-
-Or you can run the tests in venv with `pytest -v --carthage-config=.github/$USER_test_config.yml`
+* `make check` in activated venv or with system dependencies installed
+* `podman exec carthage_aws make check` for containers.
