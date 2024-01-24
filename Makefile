@@ -1,45 +1,48 @@
-.PHONY: build run-pylint run-pytest clean setup-githooks
+.PHONY: build-container  clean-container setup-githooks quality build-venv clean-venv test check
+
+PYTHON := python3
 GIT_ROOT := $(shell git rev-parse --show-toplevel)
 CONTAINER_NAME := "carthage_aws"
 
-build:
-	@if ! podman container exists $(CONTAINER_NAME); then \
-		echo "Container carthage_aws does not exist. Building..."; \
-		podman pull ghcr.io/hadron/carthage:latest ; \
-		podman run -d --name $(CONTAINER_NAME) --privileged -v $(HOME)/.aws:/root/.aws -v $(GIT_ROOT):/carthage_aws --device=/dev/fuse carthage:latest ; \
-		podman exec $(CONTAINER_NAME) apt update ; \
-		podman exec $(CONTAINER_NAME) apt -y install python3-pytest python3-boto3 pylint ; \
-	fi
+FILES = $(shell git ls-files '*.py')
+# Defaurt pytest options blank
+PYTEST_OPTIONS :=
 
-run-pylint: build
-	@if [ -z "$(FILES)" ]; then \
-		podman exec -ti -w /carthage_aws $(CONTAINER_NAME) pylint $(shell git ls-files '*.py'); \
-	else \
-		podman exec -ti -w /carthage_aws $(CONTAINER_NAME) pylint $(FILES); \
-	fi
+all: check quality
 
-pylint:
-	@if command -v pylint > /dev/null 2>&1; then \
-		echo "Running local pylint..."; \
-		if [ -z "$(FILES)" ]; then \
-			pylint -v $(shell git ls-files '*.py'); \
-		else \
-			pylint $(FILES); \
-		fi; \
-	else \
-		echo "Running pylint in Podman..."; \
-		$(MAKE) run-pylint; \
-	fi
+pylint quality:
+	pylint $(FILES)
 
-
-run-pytest: build
-	podman exec -ti -w/carthage_aws $(CONTAINER_NAME) pytest-3 -v --carthage-config=.github/${USER}_test_config.yml
-
-clean:
-	podman rm -f $(CONTAINER_NAME)
+check tes:
+	$(PYTHON) -mpytest --carthage-config=.github/test_config.yml tests $(PYTEST_OPTIONS)
 
 setup-githooks:
 	@for hook in githooks/*; do \
 		ln -sf ../../$$hook .git/hooks/`basename $$hook`; \
 		echo "Installed $$hook"; \
 	done
+
+build-container:
+	@set -e ;\
+	if ! podman container exists $(CONTAINER_NAME); then \
+		echo "Container carthage_aws does not exist. Building..."; \
+		podman run --pull=newer -di --name $(CONTAINER_NAME) --privileged -v $(HOME)/.aws:/root/.aws \
+			"-v$(GIT_ROOT):$(GIT_ROOT)" --device=/dev/fuse \
+			"-eCARTHAGE_TEST_AWS_PROFILE" "-eACCESS_KEY_ID" \
+			"-eAWS_SECRET_KEY" "-w$(CURDIR)" ghcr.io/hadron/carthage:latest /bin/sh; \
+		podman exec $(CONTAINER_NAME) apt update ; \
+		podman exec $(CONTAINER_NAME) apt -y install python3-pytest python3-boto3 pylint ; \
+	else \
+		echo Starting container; \
+		podman start $(CONTAINER_NAME); \
+	fi
+
+clean-container:
+	-podman rm -f $(CONTAINER_NAME)
+
+build-venv:
+	$(PYTHON) -mvenv .venv --system-site-packages --clear
+	.venv/bin/pip install -e .[dev]
+
+clean-venv:
+	-rm -rf .venv
