@@ -1,0 +1,22 @@
+#!/bin/sh
+
+exec 1>&2
+
+EXIT_STATUS=0
+FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
+
+make pylint FILES="$file"
+
+PYLINT_EXIT=$?
+
+# If pylint exit status is not 0 or 30 (no issues or only warnings)
+if [ $PYLINT_EXIT -ne 0 ] && [ $PYLINT_EXIT -ne 30 ]; then
+	EXIT_STATUS=1
+fi
+
+if [ $EXIT_STATUS -ne 0 ]; then
+	echo "Commit failed: pylint checks did not pass."
+	exit 1
+fi
+
+exit 0
