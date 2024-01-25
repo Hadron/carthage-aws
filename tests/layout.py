@@ -21,6 +21,12 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
 
     layout_name = 'aws_test'
 
+    # We need to restrict to a deterministic set of availability zones
+    # because us-east-1e cannot contain t3.micro and because if we
+    # leave volumes around we want them to be in the right place next
+    # time around.
+    aws_availability_zone = 'us-east-1a'
+
     add_provider(DebianImage)
     add_provider(machine_implementation_key, dependency_quote(AwsVm))
 
