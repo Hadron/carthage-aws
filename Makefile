@@ -13,7 +13,7 @@ all: check quality
 pylint quality:
 	pylint $(FILES)
 
-check tes:
+check test:
 	$(PYTHON) -mpytest --carthage-config=.github/test_config.yml tests $(PYTEST_OPTIONS)
 
 setup-githooks:
