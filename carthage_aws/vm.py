@@ -303,10 +303,16 @@ class AwsVm(AwsManaged, Machine):
         # terminated instances do not count
         super().find_from_id()
         if self.mob:
-            if self.mob.state['Name'] == 'terminated':
+            try:
+                if self.mob.state['Name'] == 'terminated':
+                    self.mob = None
+                    return
+            except AttributeError:
+                # Sometimes for terminated instances, boto3 fails such
+                # that self.mob exists but self.mob.meta does not and
+                # so we cannot access the state.
                 self.mob = None
                 return
-
     async def post_find_hook(self):
         await self.is_machine_running()
         return await super().post_find_hook()
