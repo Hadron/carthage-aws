@@ -177,17 +177,17 @@ class ImageBuilderPipeline(MachineCustomization, InjectableModel):
 
 
     @setup_task("Build image")
-    @inject(image=InjectionKey(DebianContainerImage, _ready=False),
+    @inject(container_image=InjectionKey(DebianContainerImage, _ready=False),
             connection=InjectionKey(AwsConnection, _ready=True),
             )
-    async def build_image(self, aws_image, connection):
+    async def build_image(self, container_image, connection):
         if socket.gethostname() != self.model.name:
             raise SkipSetupTask
-        await aws_image.async_become_ready()
+        await container_image.async_become_ready()
         volume = await self.ainjector(ImageBuilderVolume)
         await self.ainjector(
             debian_container_to_vm,
-            aws_image, "aws_image.raw",
+            container_image, "aws_image.raw",
             f'{self.aws_image_size}G',
             classes='+CLOUD_INIT,EC2,GROW')
         await sh.dd(
