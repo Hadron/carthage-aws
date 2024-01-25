@@ -1,11 +1,15 @@
 #!/bin/sh
 
+
 exec 1>&2
 
 EXIT_STATUS=0
-FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
+FILES=$(git diff --cached --name-only --diff-filter=ACM HEAD| grep '\.py$')
+if [ -z "$FILES" ]; then
+    exit 0
+fi
 
-make pylint FILES="$file"
+make pylint FILES="$FILES"
 
 PYLINT_EXIT=$?
 
