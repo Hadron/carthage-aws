@@ -37,5 +37,5 @@ async def cleanup(ainjector):
         while True:
             aws_image = await ainjector(AwsImage, name='test-ami*')
             await aws_image.delete()
-    except NotImplementedError:
+    except (LookupError, NotImplementedError):
         pass
