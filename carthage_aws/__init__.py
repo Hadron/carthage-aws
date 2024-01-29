@@ -43,6 +43,9 @@ __all__ += [
 from .ebs import AwsVolume, attach_volume_task, AwsSnapshot
 __all__ += ['AwsVolume', 'attach_volume_task', 'AwsSnapshot']
 
+from .secret import secret_ref, upsert_secret
+__all__ += ['secret_ref', 'upsert_secret']
+
 class AwsConfig(ConfigSchema, prefix = "aws"):
     #:aws_access_key_id
     access_key_id: ConfigString
