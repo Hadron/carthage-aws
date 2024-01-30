@@ -1,4 +1,4 @@
-name: Pylint
+name: Code Quality Checks
 on:
   push: {}
   schedule:
@@ -14,8 +14,12 @@ jobs:
           podman pull ghcr.io/hadron/carthage:latest
           podman run -v`pwd`:/carthage_aws -d --name carthage --privileged --device=/dev/fuse carthage:latest
           podman exec carthage apt update
-          podman exec carthage apt -y install python3-pytest python3-boto3 pylint
+          podman exec carthage apt -y install python3-pytest python3-boto3 pylint black
 
-      - name: run pylint
+      - name: Static Code Analysis (Pylint)
         run: |
           podman exec -ti -w/carthage_aws carthage pylint $(git ls-files '*.py') 
+
+      - name: Code Formatting Analysis (Black)
+        run: |
+          podman exec -ti -w/carthage_aws carthage black --check $(git ls-files '*.py')
