@@ -1,4 +1,4 @@
-.PHONY: build-container  clean-container setup-githooks quality build-venv clean-venv test check
+.PHONY: build-container clean-container setup-githooks quality pylint build-venv clean-venv test check
 
 PYTHON := python3
 GIT_ROOT := $(shell git rev-parse --show-toplevel)

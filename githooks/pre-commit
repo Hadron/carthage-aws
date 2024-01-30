@@ -16,12 +16,14 @@ if [ -z "$FILES" ]; then
 	exit 0
 fi
 
+PYLINT_FILES=""
 # Use git checkout-index to check out the files into the pylint directory
 for FILE in $FILES; do
 	git checkout-index --prefix="$PYLINT_DIR/" --force -- "$FILE"
+	PYLINT_FILES="$PYLINT_FILES $PYLINT_DIR/$FILE"
 done
 
-make pylint FILES="$PYLINT_DIR/$FILES"
+make pylint FILES="$PYLINT_FILES"
 PYLINT_EXIT=$?
 
 # If pylint exit status is not 0 or 30 (no issues or only warnings)
