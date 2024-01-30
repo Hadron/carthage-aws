@@ -2,7 +2,7 @@
 
 exec 1>&2
 
-PYLINT_DIR="./pylint"
+PYLINT_DIR="$(git rev-parse --git-dir)/pylint"
 
 mkdir -p "$PYLINT_DIR"
 
