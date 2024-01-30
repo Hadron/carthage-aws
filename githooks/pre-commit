@@ -1,26 +1,52 @@
 #!/bin/sh
 
-
 exec 1>&2
 
-EXIT_STATUS=0
-FILES=$(git diff --cached --name-only --diff-filter=ACM HEAD| grep '\.py$' |tr "\n" " ")
-if [ -z "$FILES" ]; then
-    exit 0
+# Path to store the temp directory location
+TEMP_DIR_PATH_FILE=".git/temp_lint_dir"
+
+# Check if a previous temp directory exists
+if [ -f "$TEMP_DIR_PATH_FILE" ]; then
+	TEMP_DIR=$(cat "$TEMP_DIR_PATH_FILE")
+	if [ ! -d "$TEMP_DIR" ]; then
+		TEMP_DIR=$(mktemp -d)
+		echo "$TEMP_DIR" >"$TEMP_DIR_PATH_FILE"
+	fi
+else
+	TEMP_DIR=$(mktemp -d)
+	echo "$TEMP_DIR" >"$TEMP_DIR_PATH_FILE"
 fi
 
-make pylint FILES="$FILES"
+cleanup() {
+	if [ -f "$TEMP_DIR_PATH_FILE" ]; then
+		rm -f "$TEMP_DIR_PATH_FILE"
+	fi
+	rm -rf "$TEMP_DIR"
+}
 
+# Check for python files in the staging area
+FILES=$(git diff --cached --name-only --diff-filter=ACM HEAD | grep '\.py$')
+if [ -z "$FILES" ]; then
+	exit 0
+fi
+
+# Copy staged versions of files to the temporary directory
+for FILE in $FILES; do
+	mkdir -p "$TEMP_DIR/$(dirname "$FILE")"
+	git show :"$FILE" >"$TEMP_DIR/$FILE"
+done
+
+# Run pylint on the files in the temporary directory
+make pylint FILES="$TEMP_DIR/$FILES"
 PYLINT_EXIT=$?
 
 # If pylint exit status is not 0 or 30 (no issues or only warnings)
 if [ $PYLINT_EXIT -ne 0 ] && [ $PYLINT_EXIT -ne 30 ]; then
-	EXIT_STATUS=1
-fi
-
-if [ $EXIT_STATUS -ne 0 ]; then
 	echo "Commit failed: pylint checks did not pass."
+	echo "You can find the files that failed linting in $TEMP_DIR"
 	exit 1
+else
+	cleanup
 fi
 
 exit 0
