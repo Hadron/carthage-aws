@@ -1,26 +1,38 @@
 #!/bin/sh
 
-
 exec 1>&2
 
-EXIT_STATUS=0
-FILES=$(git diff --cached --name-only --diff-filter=ACM HEAD| grep '\.py$' |tr "\n" " ")
+PYLINT_DIR="./pylint"
+
+mkdir -p "$PYLINT_DIR"
+
+cleanup() {
+	rm -rf "$PYLINT_DIR"
+}
+
+# Check for python files in the staging area
+FILES=$(git diff --cached --name-only --diff-filter=ACM HEAD | grep '\.py$')
 if [ -z "$FILES" ]; then
-    exit 0
+	exit 0
 fi
 
-make pylint FILES="$FILES"
+PYLINT_FILES=""
+# Use git checkout-index to check out the files into the pylint directory
+for FILE in $FILES; do
+	git checkout-index --prefix="$PYLINT_DIR/" --force -- "$FILE"
+	PYLINT_FILES="$PYLINT_FILES $PYLINT_DIR/$FILE"
+done
 
+make pylint FILES="$PYLINT_FILES"
 PYLINT_EXIT=$?
 
 # If pylint exit status is not 0 or 30 (no issues or only warnings)
 if [ $PYLINT_EXIT -ne 0 ] && [ $PYLINT_EXIT -ne 30 ]; then
-	EXIT_STATUS=1
-fi
-
-if [ $EXIT_STATUS -ne 0 ]; then
 	echo "Commit failed: pylint checks did not pass."
+	echo "You can find the files that failed linting in $PYLINT_DIR"
 	exit 1
+else
+	cleanup
 fi
 
 exit 0
