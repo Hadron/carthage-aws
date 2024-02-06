@@ -429,9 +429,10 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
         In this case set readonly because if we are deleted, we would be unable to recreate ourselves next time around.
         '''
         if not hasattr(self.network, 'v4_config'):
+            self.network.v4_config = V4Config()
+        if not self.network.v4_config.network:
             self.readonly = True
-            self.network.v4_config = V4Config(
-                network=self.mob.cidr_block)
+            self.network.v4_config.network = self.mob.cidr_block
 
     def do_create(self):
         availability_zone = self._gfi("aws_availability_zone", default=None)
