@@ -17,9 +17,11 @@ if [ -z "$FILES" ]; then
 fi
 
 PYLINT_FILES=""
-# Use git checkout-index to check out the files into the pylint directory
+# Use git checkout-index with a prefix to create a clean copy of what
+# is currently staged. We need all the files, not just modified files
+# so that relative imports work and so that packages are identified.
+git checkout-index --prefix="$PYLINT_DIR/" --force -a
 for FILE in $FILES; do
-	git checkout-index --prefix="$PYLINT_DIR/" --force -- "$FILE"
 	PYLINT_FILES="$PYLINT_FILES $PYLINT_DIR/$FILE"
 done
 
