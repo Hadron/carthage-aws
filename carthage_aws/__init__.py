@@ -13,8 +13,8 @@ from carthage.config import ConfigSchema
 from carthage.config.types import ConfigString
 __all__ = []
 
-from .connection import AwsConnection
-__all__ += ['AwsConnection']
+from .connection import AwsConnection, AwsTagProvider, carthage_aws_layout_adopt_resources
+__all__ += ['AwsConnection', 'AwsTagProvider', 'carthage_aws_layout_adopt_resources']
 
 from .network import (
     AwsVirtualPrivateCloud, AwsSubnet, SgRule, AwsSecurityGroup, VpcAddress,
@@ -74,6 +74,7 @@ class AwsConfig(ConfigSchema, prefix = "aws"):
 def enable_new_aws_connection(injector):
     conn = AwsConnection
     injector.add_provider(InjectionKey(AwsConnection), conn)
+    injector.add_provider(connection.LayoutTagProvider)
 
 @inject(injector=Injector)
 def carthage_plugin(injector):

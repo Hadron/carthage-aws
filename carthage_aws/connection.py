@@ -1,20 +1,21 @@
-# Copyright (C) 2022, 2023, Hadron Industries, Inc.
+# Copyright (C) 2022, 2023, 2024, Hadron Industries, Inc.
 # Carthage is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
 # as published by the Free Software Foundation. It is distributed
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the file
 # LICENSE for details.
-from pathlib import Path
 
+from pathlib import Path
 import asyncio
 import os
+import typing
 
 import carthage.network
 from carthage import *
 from carthage.config import ConfigLayout
 from carthage.dependency_injection import *
-from carthage.modeling import propagate_key
+from carthage.modeling import propagate_key, CarthageLayout
 import boto3
 from botocore.exceptions import ClientError
 
@@ -183,11 +184,18 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         to tag the initially created volume.
 
         '''
+        filter_res = self.injector.filter_instantiate(AwsTagProvider, ['name'])
+        tag_providers: list[AwsTagProvider]  = [x[1] for x in filter_res]
         results = []
         for resource_type in self.resource_types_to_tag:
             tags = []
             if self.name:
                 tags.append({"Key":"Name", "Value":self.name})
+            for provider in tag_providers:
+                for k, v in provider.resource_tags(self, resource_type).items():
+                    tags.append({
+                        'Key': k,
+                        'Value': v})
             results.append( {
                 "ResourceType":resource_type.replace('_','-'),
                 "Tags":tags
@@ -477,3 +485,166 @@ class AwsDeployableFinder(DeployableFinder):
                 for _, network in networks:
                     subnets.append(await network.access_by(AwsSubnet, ready=False))
         return subnets + [x[1] for x in results]
+
+class AwsTagProvider(Injectable):
+
+    '''An AwsTagProvider provides tags for resources to conform to some sort of schema.  Usage might include:
+
+    * Tracking which objects are created by a given layout so that
+      orphans can be detected; see :class:`LayoutTagProvider`.
+
+    * Track billing and asset allocation according to local needs.
+
+    * Track aspects of a model to know when reconfiguration is required.
+
+    When a :class:`AwsManaged` is created,
+    :meth:`AwsManaged.resource_tags` instatiates all tag providers in
+    the local injector using
+    :meth:`~carthage.Injector.filter_instantiate`.  Then it calls
+    :meth:`resource_tags` on the providers and collects together
+    appropriate tags.
+
+    TagProviders are also instantiated by :class:`AwsConnection`
+    during inventory.  Then :meth:`tag_filter` is called to narrow
+    down the set of resources that may belong to the connection.  This
+    limits resources that will be considered by
+    :meth:`Awsconnaction.possible_ids_for_name`.
+
+    Typical usage is to subclass this class and then::
+
+        base_injector.add_provider(SomeTagProviderSubclass)
+
+    However, note that where inn the injector hierarchy the
+    *AwsTagProvider* is added affects which tag providers will be used
+    in what circumstances as well as what dependencies can be provided
+    by the tag provider's :class:`Injector`:
+
+    * Since :class:`AwsConnection` is typically added to
+      *base_injector*, in this configuration, only tag providers
+      *registered at the base injector will have their
+      *:meth:`tag_filter` methods called.  If tag providers are
+      *registered lower in the hierarchy that need to contribute to
+      *the tag filter, then :class:`AwsConnection` should also be
+      *registered lower in the hierarchy.
+
+    * If a tag provider is added to an injector with *allow_multiple*
+      False, then that tag provider can only access dependencies
+      provided by the injector where it is added. As an example, a tag
+      provider added at the base injector could not access modeling
+      keys propagated up to the injector of a
+      :class:`~carthage.modeling.CarthageLayout`.  If *allow_multiple*
+      is set to true, at least when :meth:`resource_tags` is called,
+      the tag provider can access any dependencies available to the
+      tagged resource.
+
+    * Even if the tag provider is added with *allow_multiple* True,
+      then :meth:`tag_filter` is limited in what dependencies it can
+      access because again :class:`AwsConnection` tends to be high in
+      the hierarchy.  Having too many AWS connections will impact
+      performance: :class:`AwsConnection` is expensive to instantiate.
+
+    *If tag providers are added with *allow_multiple* True, then there
+      will be multiple instances of the provider.  This may impact
+      performance.
+
+    See :class:`LayoutTagProvider` for a practical discussion of these implications.
+
+    '''
+
+    # A name under which the tag provider is registered.
+    name: typing.ClassVar[str]
+
+    @classmethod
+    def default_class_injection_key(cls):
+        return InjectionKey(AwsTagProvider, name=cls.name)
+
+    def tag_filter(self)-> dict[str, list[str]]:
+        '''Returns a dictionary of key-value pairs.  Keys are tags,
+        and values are lists of acceptable values.  Called by
+        :class:`AwsConnection` to set up a filter that excludes
+        objects that should not be considered for name-to-id mapping.
+        See class documentation for caveats around which
+        AwsTagProviders are used based on injector positioning between
+        the tag provider and :class:`AwsConnection`.
+        '''
+        return {}
+
+    # pylint: disable=unused-argument
+    def resource_tags(self, resource:AwsManaged, resource_type:str)-> dict[str,str]:
+        '''The tags a given resource should have. Returns a dict mapping tag keys to their value.
+
+        :param resource: the resource being tagged.
+
+        :param resource_type: The resource type that is currently
+        being tagged.  A create operation may tag multiple types of
+        resources.  As an example, running an instance typically also
+        creates EBS volumes and network interfaces.
+
+        '''
+        return {}
+
+__all__ += ['AwsTagProvider']
+
+class LayoutTagProvider(AwsTagProvider):
+
+    '''Tags resources based on their membership in a :class:`~carthage.modeling.CarthageLayout`.
+
+    This tag provider is added at the base injector as part of the
+    initialization of the AWS plugin. As a result, for creating a tag
+    filter, it will only find a layout that is available at the base
+    injector.  Since ``carthage-runner`` also finds its layout at the
+    base injector, it is typical for layouts to be registered there.
+
+    In contrast, resource_tags looks for a layout on the object being tagged.
+
+    Note that even if a layout can be found, the default behavior is
+    not to create a tag filter but instead to **adopt** resources that
+    have the same name as the current layout would produce but that
+    are not tagged by the layout.  If a tag filter is desired, execute
+    the following::
+
+        base_injector.add_provider(carthage_aws_layout_adopt_resources, False)
+
+    '''
+
+    name = 'layout'
+
+    def resource_tags(self, resource, resource_type):
+        try:
+            layout = resource.injector.get_instance(CarthageLayout)
+        except (KeyError, AsyncRequired):
+            return {}
+        if not layout.layout_name:
+            return {}
+        return {
+            'carthage:layout': layout.layout_name,
+            }
+
+    def tag_filter(self):
+        try:
+            config = self.injector(ConfigLayout)
+            if config.layout_name:
+                layout = self.injector.get_instance(InjectionKey(
+                    CarthageLayout, layout_name=config.layout_name,
+                    _ready=True))
+            else:
+                layout = self.injector.get_instance(InjectionKey(CarthageLayout, _ready=False))
+            adopt = self.injector.get_instance(InjectionKey(carthage_aws_layout_adopt_resources, _optional=True))
+            if adopt is None:
+                adopt = True
+        except (KeyError, AsyncRequired):
+            return {}
+        if adopt or not layout.layout_name:
+            return {}
+        return {
+            'carthage:layout': layout.layout_name,
+            }
+
+#: An injection key to configure whether the layout adopts resources
+#that have a name produced by the layout but are not tagged as having
+#a layout.  Layouts should adopt resources if they predate support for
+#the layout tag provider, or if they are moving from no layout_name to
+#a layout_name.
+carthage_aws_layout_adopt_resources = InjectionKey('carthage_aws.adopt_resources')
+
+__all__ += ['carthage_aws_layout_adopt_resources']
