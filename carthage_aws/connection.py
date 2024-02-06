@@ -46,9 +46,25 @@ class AwsConnection(AsyncInjectable):
         self.names_by_resource_type = {}
 
 
+    async def _tag_filter(self):
+        ''' Produce tag filter; see :meth:`AwsTagProvider.tag_filter`
+        '''
+        providers_res = await self.ainjector.filter_instantiate_async(AwsTagProvider, ['name'])
+        providers: list[AwsTagProvider] = [x[1] for x in providers_res]
+        tags: dict[str, set[str]] = {}
+        for provider in providers:
+            for k, values in provider.tag_filter().items():
+                tags.setdefault(k, set())
+                tags[k] |= set(values)
+        result = []
+        for k, values in tags.items():
+            result.append({
+                'Name': 'Tag:'+k,
+                'Values': list(values),
+                })
+        return result
+
     async def inventory(self):
-        await run_in_executor(self._inventory)
-    def _setup(self):
         self.connection = boto3.Session(
             aws_access_key_id=self.config.access_key_id,
             aws_secret_access_key=self.config.secret_access_key,
@@ -58,12 +74,15 @@ class AwsConnection(AsyncInjectable):
         self.client = self.connection.client('ec2', region_name=self.region)
         for key in self.client.describe_key_pairs()['KeyPairs']:
             self.keys.append(key['KeyName'])
-        self._inventory()
+        tag_filter = await self._tag_filter()
+        await run_in_executor(self._inventory, tag_filter)
 
-    def _inventory(self):
+    def _inventory(self, tag_filter):
         # Executor context
         nbrt = self.names_by_resource_type
-        r = self.client.describe_tags(Filters=[{'Name':'key', 'Values':['Name']}])
+        r = self.client.describe_tags(
+            Filters=[{'Name':'key', 'Values':['Name']},
+                     *tag_filter])
         for resource in r['Tags']:
             rt, rv = resource['ResourceType'], resource['Value']
             rt = rt.replace('-','_')
@@ -111,7 +130,7 @@ class AwsConnection(AsyncInjectable):
                 self.run_vpc = v
 
     async def async_ready(self):
-        await run_in_executor(self._setup)
+        await self.inventory()
         return await super().async_ready()
 
     def invalid_ec2_resource(self, resource_type, resource_id, *, name=None):
@@ -585,6 +604,7 @@ class AwsTagProvider(Injectable):
 
 __all__ += ['AwsTagProvider']
 
+@inject_autokwargs(injector=Injector)
 class LayoutTagProvider(AwsTagProvider):
 
     '''Tags resources based on their membership in a :class:`~carthage.modeling.CarthageLayout`.
@@ -637,7 +657,7 @@ class LayoutTagProvider(AwsTagProvider):
         if adopt or not layout.layout_name:
             return {}
         return {
-            'carthage:layout': layout.layout_name,
+            'carthage:layout': [layout.layout_name],
             }
 
 #: An injection key to configure whether the layout adopts resources
