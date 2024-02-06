@@ -290,7 +290,7 @@ class AwsVm(AwsManaged, Machine):
                 InstanceType=self._gfi('aws_instance_type'),
                 UserData=user_data,
                 NetworkInterfaces=network_interfaces,
-                TagSpecifications=[self.resource_tags],
+                TagSpecifications=self.resource_tags(),
                 **extra
             )
             self.id = r['Instances'][0]['InstanceId']

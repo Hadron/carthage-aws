@@ -165,15 +165,34 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         # override for non-ec2
         return self.connection.connection.resource('ec2', region_name=self.connection.region)
 
-    @property
+    @memoproperty
+    def resource_types_to_tag(self)-> list:
+        '''
+        Which resource types to include in tag specifications.  Defaults to self.resource_type
+        '''
+        return [self.resource_type]
+
     def resource_tags(self):
-        tags = []
-        if self.name:
-            tags.append({"Key":"Name", "Value":self.name})
-        return {
-            "ResourceType":self.resource_type.replace('_','-'),
-            "Tags":tags
-        }
+        '''Return a TagSpecification.  If the object has a name, includes a Name tag in the specification.
+        See :class:`AwsTagProvider` for other tags.
+
+        Typically resources of types included in
+        :attr:`resource_types_to_tag` are tagged. That defaults to
+        :attr:`resource_type` but for example could be extended on a
+        :class:`~.vm.AwsVm` to include *volume* as well as *instance*
+        to tag the initially created volume.
+
+        '''
+        results = []
+        for resource_type in self.resource_types_to_tag:
+            tags = []
+            if self.name:
+                tags.append({"Key":"Name", "Value":self.name})
+            results.append( {
+                "ResourceType":resource_type.replace('_','-'),
+                "Tags":tags
+        })
+        return results
 
     def find_from_id(self):
         #called in executor context; create a mob from id

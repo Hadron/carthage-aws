@@ -90,7 +90,7 @@ class AwsVirtualPrivateCloud(AwsManaged, ModelContainer):
             r = self.connection.client.create_vpc(
                     InstanceTenancy='default',
                                                       CidrBlock=self.vpc_cidr,
-                    TagSpecifications=[self.resource_tags])
+                    TagSpecifications=self.resource_tags())
             self.id = r['Vpc']['VpcId']
 
 
@@ -294,7 +294,7 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
             Description=self.description,
             GroupName=self.name,
             VpcId=self.vpc.id,
-            TagSpecifications=[self.resource_tags]
+            TagSpecifications=self.resource_tags()
         )
 
         # refresh groups at vpc level
@@ -377,10 +377,10 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
             return []
         return await run_in_executor(callback)
 
-    @property
+
     def resource_tags(self):
         if self.include_tags and self.name:
-            return super().resource_tags
+            return super().resource_tags()
         return []
 
 
@@ -442,7 +442,7 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
         try:
             r = self.connection.client.create_subnet(VpcId=self.vpc.id,
                                                      CidrBlock=str(self.network.v4_config.network),
-                                                     TagSpecifications=[self.resource_tags],
+                                                     TagSpecifications=self.resource_tags(),
                                                      **extra_args
                                                      )
             self.id = r['Subnet']['SubnetId']
@@ -500,7 +500,7 @@ class VpcAddress(AwsManaged):
     def do_create(self):
         #executor context
         r = self.connection.client.allocate_address(Domain='vpc',
-                                                    TagSpecifications=[self.resource_tags])
+                                                    TagSpecifications=self.resource_tags())
         self.id = r['AllocationId']
 
 
@@ -658,7 +658,7 @@ class AwsRouteTable(AwsManaged):
         try:
             r = self.connection.client.create_route_table(
                     VpcId=self.vpc.id,
-                    TagSpecifications=[self.resource_tags]
+                    TagSpecifications=self.resource_tags()
             )
             self.id = r['RouteTable']['RouteTableId']
         except ClientError as e:
@@ -763,7 +763,7 @@ class AwsInternetGateway(AwsManaged):
 
     def do_create(self):
         r = self.connection.client.create_internet_gateway(
-                TagSpecifications=[self.resource_tags]
+                TagSpecifications=self.resource_tags()
         )
         self.id = r['InternetGateway']['InternetGatewayId']
 
@@ -873,7 +873,7 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
         r = self.connection.client.create_nat_gateway(
             ConnectivityType=self.connectivity_type,
             SubnetId=self.subnet.id,
-            TagSpecifications=[self.resource_tags],
+            TagSpecifications=self.resource_tags(),
             **extras)
         self.id = r['NatGateway']['NatGatewayId']
 

@@ -49,7 +49,7 @@ class AwsVolume(AwsManaged, InjectableModel):
     def do_create(self):
         create_args = {
             "VolumeType":self.volume_type,
-            "TagSpecifications":[self.resource_tags],
+            "TagSpecifications":self.resource_tags(),
             "AvailabilityZone":self._gfi('aws_availability_zone')
         }
         if self.snapshot_id:
@@ -193,7 +193,7 @@ class AwsSnapshot(AwsManaged, InjectableModel):
         self.mob = self.service_resource.create_snapshot(
             Description=self.description,
             VolumeId=self.volume_id,
-            TagSpecifications=[self.resource_tags],
+            TagSpecifications=self.resource_tags(),
         )
 
     async def wait_for_available(self):
