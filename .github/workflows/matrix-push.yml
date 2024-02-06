@@ -1,3 +1,4 @@
+name: Notify Carthage Room
 on: [push]
 
 jobs:
