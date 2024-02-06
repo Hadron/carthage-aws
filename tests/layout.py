@@ -17,48 +17,45 @@ from carthage_base import CarthageServerRole, DebianImage
 from carthage_aws import *
 from carthage_aws.dns import AwsPrivateHostedZone
 
-class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
 
-    layout_name = 'aws_test'
+class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
+    layout_name = "aws_test"
 
     # We need to restrict to a deterministic set of availability zones
     # because us-east-1e cannot contain t3.micro and because if we
     # leave volumes around we want them to be in the right place next
     # time around.
-    aws_availability_zone = 'us-east-1a'
+    aws_availability_zone = "us-east-1a"
 
     add_provider(DebianImage)
     add_provider(machine_implementation_key, dependency_quote(AwsVm))
 
-    @provides(InjectionKey(DnsZone, role='public_zone'))
+    @provides(InjectionKey(DnsZone, role="public_zone"))
     class autotest_photon_ac(AwsHostedZone, InjectableModel):
-
-        name = 'autotest.photon.ac'
+        name = "autotest.photon.ac"
         add_provider(destroy_policy, DeletionPolicy.retain)
 
     @provides(InjectionKey(DnsZone, role="private_zone"))
     class autotest_photon_local(AwsPrivateHostedZone, InjectableModel):
         name = "autotest.photon.local"
 
-
     add_provider(WriteAuthorizedKeysPlugin, allow_multiple=True)
-    #aws_key_name = 'main'
-    add_provider(InjectionKey('aws_ami'), image_provider(owner=debian_ami_owner, name='debian-12-amd64-*'))
+    # aws_key_name = 'main'
+    add_provider(InjectionKey("aws_ami"), image_provider(owner=debian_ami_owner, name="debian-12-amd64-*"))
 
     domain = "autotest.photon.ac"
+
     class our_net(NetworkModel):
         v4_config = V4Config(network="192.168.100.0/24")
-        aws_security_groups = ['all_open']
-
+        aws_security_groups = ["all_open"]
 
     class all_open(AwsSecurityGroup):
-        ingress_rules = [SgRule(
-            cidr='0.0.0.0/0', proto=-1)]
+        ingress_rules = [SgRule(cidr="0.0.0.0/0", proto=-1)]
 
-        name = 'all_open'
+        name = "all_open"
+
     class net_config(NetworkConfigModel):
-        add('eth0', mac=None,
-            net=InjectionKey("our_net"))
+        add("eth0", mac=None, net=InjectionKey("our_net"))
 
     class test_private_vm(MachineModel):
         name = "private-vm"
@@ -66,25 +63,21 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
         aws_instance_type = "t2.micro"
 
         class net_config(NetworkConfigModel):
-            add('eth0', mac=None, net=InjectionKey("our_net"))
-
+            add("eth0", mac=None, net=InjectionKey("our_net"))
 
     class test_vm(MachineModel):
-        name="test-vm"
+        name = "test-vm"
         cloud_init = True
         aws_instance_type = "t2.micro"
-        disk_sizes = (20,80)
+        disk_sizes = (20, 80)
 
         class static_ip_net_config(NetworkConfigModel):
-            add('eth0', mac=None, net=InjectionKey("our_net"),
-                v4_config=V4Config(
-                    dhcp=False,
-                    address='192.168.100.237'
-                )
+            add(
+                "eth0", mac=None, net=InjectionKey("our_net"), v4_config=V4Config(dhcp=False, address="192.168.100.237")
             )
 
     class test_no_ready(MachineModel):
-        name="test-vm-no-ready"
+        name = "test-vm-no-ready"
         cloud_init = True
         aws_instance_type = "t2.micro"
 
@@ -93,15 +86,15 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
 
     class some_volume(AwsVolume):
         volume_size = 4
-        aws_availability_zone = 'us-east-1a'
+        aws_availability_zone = "us-east-1a"
         name = "some_volume"
+
     class instance_for_volume(MachineModel, AsyncInjectable):
-        aws_instance_type = 't3.micro'
+        aws_instance_type = "t3.micro"
 
         class volume(AwsVolume):
             volume_size = 4
             name = "attach_me"
-
 
     # The layout already has AnsibleModelMixin, but this will force a
     # new inventory generation when image_builder is built.
@@ -112,8 +105,8 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
         add_provider(machine_implementation_key, MaybeLocalAwsVm)
         cloud_init = True
 
-        aws_instance_type = 't3.medium'
-        name = 'image-builder'
+        aws_instance_type = "t3.medium"
+        name = "image-builder"
         layout_source = os.path.dirname(__file__)
         layout_destination = "carthage_aws"
         aws_image_size = 8
@@ -121,46 +114,37 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
         config_info = mako_task("config.yml.mako", output="carthage_aws/config.yml", config=InjectionKey(ConfigLayout))
 
         class install(MachineCustomization):
-
             @setup_task("install software")
             async def install_software(self):
-                await self.ssh("apt -y install python3-pip rsync python3-pytest python3-netifaces ansible",
-                               _bg=True, _bg_exc=False)
+                await self.ssh(
+                    "apt -y install python3-pip rsync python3-pytest python3-netifaces ansible", _bg=True, _bg_exc=False
+                )
                 await self.ssh("apt -y install python3-boto3", _bg=True, _bg_exc=False)
-                await self.ssh('systemctl enable --now systemd-resolved', _bg=True, _bg_exc=False)
+                await self.ssh("systemctl enable --now systemd-resolved", _bg=True, _bg_exc=False)
 
-            install_mako = install_mako_task('model')
-
+            install_mako = install_mako_task("model")
 
     class all_access(AwsSecurityGroup):
-                         # This is the same as all_open used above,
-                         # but two different groups are used to
-                         # isolate the one to which vms are connected
-                         # to from the one to which tests for sg
-                         # creation and deletion are made.
+        # This is the same as all_open used above,
+        # but two different groups are used to
+        # isolate the one to which vms are connected
+        # to from the one to which tests for sg
+        # creation and deletion are made.
 
-        name = 'all_access'
+        name = "all_access"
 
-        ingress_rules = [SgRule(
-            description='Allow Everything',
-            cidr='0.0.0.0/0',
-            port=-1,
-            proto=-1)]
-
+        ingress_rules = [SgRule(description="Allow Everything", cidr="0.0.0.0/0", port=-1, proto=-1)]
 
     class no_access(AwsSecurityGroup):
-        name = 'no_access'
+        name = "no_access"
         ingress_rules = []
         egress_rules = []
 
-
     class ip_1(VpcAddress):
-        name = 'address_1'
+        name = "address_1"
 
     class ip_test(MachineModel):
+        aws_instance_type = "t3.micro"
 
-        aws_instance_type = 't3.micro'
         class net_config(NetworkConfigModel):
-            add('eth0', mac=None,
-                    net=InjectionKey("our_net"),
-                v4_config=V4Config(public_address=injector_access(ip_1)))
+            add("eth0", mac=None, net=InjectionKey("our_net"), v4_config=V4Config(public_address=injector_access(ip_1)))

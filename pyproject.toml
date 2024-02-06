@@ -57,3 +57,6 @@ disable = [
 max-branches = 15
 max-parents = 10
 
+[tool.black]
+line-length = 120
+target-version = ['py311']
