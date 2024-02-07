@@ -42,7 +42,6 @@ class AwsConnection(AsyncInjectable):
         self.igs = []
         self.subnets = []
         self.groups = []
-        self.run_vpc = None
         self.names_by_resource_type = {}
 
 
@@ -99,12 +98,6 @@ class AwsConnection(AsyncInjectable):
                         vpc['name'] = t['Value']
             else: vpc['name'] = ''
             self.vpcs.append(vpc)
-            if (self.config.vpc_id != None or self.config.vpc_id != '') and vpc['id'] == self.config.vpc_id:
-                self.run_vpc = vpc
-            elif (self.config.vpc_id in (None, '')) and 'Tags' in v:
-                for t in v['Tags']:
-                    if t['Key'] == 'Name' and t['Value'] == self.config.vpc_name:
-                        self.run_vpc = vpc
 
         r = self.client.describe_internet_gateways()
         for ig in r['InternetGateways']:
@@ -124,10 +117,6 @@ class AwsConnection(AsyncInjectable):
             self.subnets.append(subnet)
 
 
-    def set_running_vpc(self, vpc):
-        for v in self.vpcs:
-            if v['id'] == vpc:
-                self.run_vpc = v
 
     async def async_ready(self):
         await self.inventory()
