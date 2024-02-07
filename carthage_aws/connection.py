@@ -58,7 +58,7 @@ class AwsConnection(AsyncInjectable):
         result = []
         for k, values in tags.items():
             result.append({
-                'Name': 'Tag:'+k,
+                'Name': 'tag:'+k,
                 'Values': list(values),
                 })
         return result
