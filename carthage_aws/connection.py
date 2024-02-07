@@ -79,15 +79,29 @@ class AwsConnection(AsyncInjectable):
     def _inventory(self, tag_filter):
         # Executor context
         nbrt = self.names_by_resource_type
+        # describe_tags won't do a join for us so we need to do the
+        # intersection ourselves.
+        our_resources:set[str]|None = None
+        for component in tag_filter:
+            r = self.client.describe_tags(Filters=[component])
+            if our_resources is None:
+                # First pass, populate from the tag results.
+                our_resources = set(resource['ResourceId'] for resource in r['Tags'])
+            else:
+                # subsiquent passes: intersect
+                our_resources &= set(resource['ResourceId'] for resource in r['Tags'])
+
         r = self.client.describe_tags(
             Filters=[{'Name':'key', 'Values':['Name']},
-                     *tag_filter])
+                     ])
         for resource in r['Tags']:
-            rt, rv = resource['ResourceType'], resource['Value']
+            rt, name, rid = resource['ResourceType'], resource['Value'], resource['ResourceId']
+            if our_resources is not None and rid not in our_resources:
+                continue #Not a resource we manage
             rt = rt.replace('-','_')
             nbrt.setdefault(rt, {})
-            nbrt[rt].setdefault(rv, [])
-            nbrt[rt][rv].append(resource)
+            nbrt[rt].setdefault(name, set())
+            nbrt[rt][name].add(rid)
 
         r = self.client.describe_vpcs()
         for v in r['Vpcs']:
@@ -131,8 +145,7 @@ class AwsConnection(AsyncInjectable):
         if name:
             names = self.names_by_resource_type.get(resource_type)
             if names and name in names:
-                names[name] = list(filter(
-                    lambda r: r['ResourceId'] != resource_id, names[name]))
+                names[name].remove(resource_id)
 
         self.client.delete_tags(Resources=[resource_id])
 
@@ -252,8 +265,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         except KeyError:
             return []
         if self.name in names:
-            objs = names[self.name]
-            return [obj['ResourceId'] for obj in objs]
+            return list(names[self.name])
         return []
 
     def __repr__(self):
