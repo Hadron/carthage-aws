@@ -51,6 +51,7 @@ disable = [
     "E0602",  # undefined-variable: 2
     "E0401",  # import-error: 4
     "E0611",  # no-name-in-module: 4
+    'R0914', # Too many local variables: 5
 ]
 
 [tool.pylint.DESIGN]
