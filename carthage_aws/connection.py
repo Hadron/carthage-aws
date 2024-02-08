@@ -78,7 +78,7 @@ class AwsConnection(AsyncInjectable):
 
     def _inventory(self, tag_filter):
         # Executor context
-        nbrt = self.names_by_resource_type
+        nbrt = self.names_by_resource_type = {}
         # describe_tags won't do a join for us so we need to do the
         # intersection ourselves.
         our_resources:set[str]|None = None
