@@ -112,7 +112,7 @@ class AwsVm(AwsManaged, Machine):
     @memoproperty
     def aws_ip_address_is_private(self):
         '''
-        If True, then ip_address will be populated with the private address of the 
+        If True, then ip_address will be populated with the private address of the
         instance if it is not otherwise set in a subclass or the model.
 
         By default, this is True if :meth:`ssh_jump_host` is set, otherwise False.
@@ -126,10 +126,21 @@ class AwsVm(AwsManaged, Machine):
         self.closed = False
         self._operation_lock = asyncio.Lock()
         self._clear_ip_address = True
-        self.cloud_config = None
+        self._user_data = None
         self.image_id = None
         self.iam_profile = None
         self.block_device_mappings = None
+
+    async def user_data(self):
+        '''
+        In the case where :attr:`cloud_init` is not True, generate the instance's user data.
+        This function is not called if :attr:`cloud_init` is True.
+        By default it tries to see if the model has an attribute aws_user_data.
+        '''
+        if getattr(self, 'model', None):
+            await self.model.async_become_ready()
+            return getattr(self.model, 'aws_user_data', "")
+        return ""
 
     def _find_ip_address(self):
         def async_cb():
@@ -212,10 +223,14 @@ class AwsVm(AwsManaged, Machine):
     async def pre_create_hook(self):
         # operation lock is held by overriding find_or_create
         if getattr(self.model, 'cloud_init', False):
-            self.cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
+            cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
+            user_data = "#cloud-config\n"
+            user_data += yaml.dump(cloud_config.user_data, default_flow_style=False)
+            self._user_data = user_data
             if self.ssh_online_command == Machine.ssh_online_command:
                 self.ssh_online_command = 'systemctl --wait is-system-running'
-        else: self.cloud_config = None
+        else:
+            self._user_data = await self.user_data()
         self.image_id = await self.ainjector.get_instance_async('aws_ami')
         self.iam_profile = await self.ainjector.get_instance_async(InjectionKey("aws_iam_profile", _optional=True))
         await self.start_dependencies()
@@ -266,12 +281,6 @@ class AwsVm(AwsManaged, Machine):
             network_interfaces.append(d)
             device_index += 1
 
-
-        user_data = ""
-        if self.cloud_config:
-            user_data = "#cloud-config\n"
-            user_data += yaml.dump(self.cloud_config.user_data, default_flow_style=False)
-
         logger.info('Starting %s VM', self.name)
 
         try:
@@ -288,7 +297,7 @@ class AwsVm(AwsManaged, Machine):
                 MinCount=1,
                 MaxCount=1,
                 InstanceType=self._gfi('aws_instance_type'),
-                UserData=user_data,
+                UserData=self._user_data,
                 NetworkInterfaces=network_interfaces,
                 TagSpecifications=self.resource_tags(),
                 **extra
