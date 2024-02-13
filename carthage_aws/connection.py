@@ -195,7 +195,58 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         '''
         return [self.resource_type]
 
+    def should_retag(self) -> bool:
+        '''Returns true if the resource's current tags do not align
+        with what :meth:`resource_tags` says they should be.
+
+        For now, we do not remove tags assigned elsewhere.
+
+        '''
+        current = self.current_resource_tags()
+        if current is None:
+            return False
+        expected = self.expected_resource_tags()
+        expected_keys = frozenset(expected.keys())
+        current_keys = frozenset(current.keys())
+        for k in current_keys - expected_keys:
+            del current[k]
+        return current != expected
+
+    def current_resource_tags(self):
+        '''Returns a dict mapping tag keys to values corresponding to the
+        tags actually applied to the resource.  Needs to be called
+        after :meth:`find`.
+
+        Compare :meth:`expected_resource_tags` which is the set of
+        tags that the resource is expected to have, and
+        :meth:`resource_tags` which returns those expected tags in the
+        form AWS expects in an API call.
+
+        '''
+        if self.mob is None:
+            return None
+        try:
+            tags = self.mob.tags
+        except AttributeError:
+            return None
+        results = {}
+        for t in tags:
+            results[t['Key']] = t['Value']
+        return results
+
+
+    def expected_resource_tags(self):
+        results = {}
+        if self.name:
+            results['Name'] = self.name
+        res = self.injector.filter_instantiate(AwsTagProvider, ['name'])
+        providers = [x[1] for x in res]
+        for provider in providers:
+            for k,v in provider.resource_tags(self, self.resource_type).items():
+                results[k] = v
+        return results
     def resource_tags(self):
+
         '''Return a TagSpecification.  If the object has a name, includes a Name tag in the specification.
         See :class:`AwsTagProvider` for other tags.
 
@@ -223,6 +274,21 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
                 "Tags":tags
         })
         return results
+
+    async def retag(self):
+        '''
+
+        Apply :meth:`resource_tags` to self.
+        Probably needs to be overridden for  non-ec2 resources.
+
+        '''
+        def cb():
+            self.connection.client.create_tags(
+                Resources=[self.id],
+                Tags=self.resource_tags()[0]['Tags'])
+        if not self.mob:
+            await self.find()
+        await run_in_executor(cb)
 
     def find_from_id(self):
         #called in executor context; create a mob from id
@@ -326,9 +392,11 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         # explicitly try find, because double creating is bad.
 
         await self.find()
-
         if self.mob:
             if not self.readonly:
+                if await run_in_executor(self.should_retag):
+                    logger.info('Retagging %r', self)
+                    await self.retag()
                 await self.ainjector(self.read_write_hook)
             await self.ainjector(self.post_find_hook)
             return
@@ -360,6 +428,9 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         await self.find()
         if self.mob:
             if not self.readonly:
+                if await run_in_executor(self.should_retag):
+                    logger.info('Retagging %r', self)
+                    await self.retag()
                 await self.ainjector(self.read_write_hook)
             await self.ainjector(self.post_find_hook)
             return True
