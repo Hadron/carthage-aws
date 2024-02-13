@@ -41,18 +41,22 @@ class AwsConnection(AsyncInjectable):
         self.vpcs = []
         self.igs = []
         self.subnets = []
-        self.groups = []
         self.names_by_resource_type = {}
 
 
-    async def _tag_filter(self):
-        ''' Produce tag filter; see :meth:`AwsTagProvider.tag_filter`
+    async def _tag_filter(self, strict):
+        '''Produce tag filter; see :meth:`AwsTagProvider.tag_filter`
+        :param strict: If true, then tag filters should be as strict
+        as possible to prevent falso positives for orphans.  If not
+        strict, tag filters may be permissive to adopt objects as
+        tagging policy changes.
+
         '''
         providers_res = await self.ainjector.filter_instantiate_async(AwsTagProvider, ['name'])
         providers: list[AwsTagProvider] = [x[1] for x in providers_res]
         tags: dict[str, set[str]] = {}
         for provider in providers:
-            for k, values in provider.tag_filter().items():
+            for k, values in provider.tag_filter(strict).items():
                 tags.setdefault(k, set())
                 tags[k] |= set(values)
         result = []
@@ -73,12 +77,12 @@ class AwsConnection(AsyncInjectable):
         self.client = self.connection.client('ec2', region_name=self.region)
         for key in self.client.describe_key_pairs()['KeyPairs']:
             self.keys.append(key['KeyName'])
-        tag_filter = await self._tag_filter()
-        await run_in_executor(self._inventory, tag_filter)
+        tag_filter = await self._tag_filter(False)
+        self.names_by_resource_type = await run_in_executor(self._inventory, tag_filter)
 
     def _inventory(self, tag_filter):
         # Executor context
-        nbrt = self.names_by_resource_type = {}
+        nbrt = {}
         # describe_tags won't do a join for us so we need to do the
         # intersection ourselves.
         our_resources:set[str]|None = None
@@ -121,15 +125,12 @@ class AwsConnection(AsyncInjectable):
             if a['State'] == 'attached' or a['State'] == 'available':
                 self.igs.append({'id': ig['InternetGatewayId'], 'vpc': a['VpcId']})
 
-        r = self.client.describe_security_groups()
-        for g in r['SecurityGroups']:
-            self.groups.append(g)
 
         r = self.client.describe_subnets()
         for s in r['Subnets']:
             subnet = {'CidrBlock': s['CidrBlock'], 'id': s['SubnetId'], 'vpc': s['VpcId']}
             self.subnets.append(subnet)
-
+        return nbrt
 
 
     async def async_ready(self):
@@ -242,8 +243,38 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
                     self.connection.invalid_ec2_resource(self.resource_type, self.id, name=self.name)
         return self.mob
 
+    #pylint: disable =redefined-builtin
+    @classmethod
+    @inject(injector=Injector)
+    def from_id(cls, id, name, *, injector):
+        '''Given an ID, construct a not-ready instance of *cls* that
+        is readonly.. For most subclasses of :class:`AwsManaged` this
+        class method is equivalent to::
+
+            injector(cls, id=id, name=name, readonly=True)
+
+        This method exists so that classes like
+        :class:`~.network.AwsSubnet` which need special handling can
+        properly be instantiated.
+
+        This is typically called from
+        :meth:`AwsDeployableFinder.find_orphans` and in that context
+        name is typically available. Significantly better results are
+        provided if name can be passed in; if *name* is unavailable,
+        pass in ``None``.
+
+        This method is an alternate constructor.  It is different from
+        :meth:`find_from_id`, which is the part of :meth:`find` that
+        runs in executor context.  That method is part of connecting
+        an instance of :class:`AwsManaged` with the underlying boto3
+        object representing a resource in AWS.
+
+        '''
+        with instantiation_not_ready():
+            return injector(cls, id=id, name=name, readonly=True)
 
     async def find(self):
+
         '''
         Find ourself from a name or id
         '''
@@ -506,9 +537,46 @@ class AwsDeployableFinder(DeployableFinder):
                     subnets.append(await network.access_by(AwsSubnet, ready=False))
         return subnets + [x[1] for x in results]
 
+    async def find_orphans(self, deployables):
+        '''
+        This method looks at the inventory maintained by
+        :class:`AwsConnection`. That inventory collects all the
+        resource IDs for :class:`AwsManaged` objects previously
+        produced by the current layout.  This method collects the
+        resource IDs from the input deployables and subtracts them
+        from the resource IDs found from the inventory. Any remaining
+        resource IDs represent orphans. These objects are instantiated
+        readonly and returned.
+
+        '''
+        deployed_ids = set()
+        connection = await self.ainjector.get_instance_async(AwsConnection)
+        await connection.async_become_ready()
+        if not (tag_filter := await connection._tag_filter(True)): # pylint: disable=protected-access
+            logger.info('AWS orphan detection unavailable because no tag filter set; consider setting layout_name')
+            return []
+        #pylint: disable=protected-access
+        names_by_resource_type = await run_in_executor(connection._inventory, tag_filter)
+        for d in deployables:
+            if not isinstance(d, AwsManaged):
+                continue
+            assert d.id is not None, f'{d} reached find_orphans without and id'
+            deployed_ids.add(d.id)
+        results = []
+        for rt, name_ids in names_by_resource_type.items():
+            if not (cls := aws_type_registry.get(rt)):
+                continue
+            for name, ids in name_ids.items():
+                with instantiation_not_ready():
+                    ids = ids - deployed_ids
+                    for x in ids:
+                        results.append(self.injector(cls.from_id, x, name))
+        return results
+
 class AwsTagProvider(Injectable):
 
-    '''An AwsTagProvider provides tags for resources to conform to some sort of schema.  Usage might include:
+    '''
+        An AwsTagProvider provides tags for resources to conform to some sort of schema.  Usage might include:
 
     * Tracking which objects are created by a given layout so that
       orphans can be detected; see :class:`LayoutTagProvider`.
@@ -578,7 +646,8 @@ class AwsTagProvider(Injectable):
     def default_class_injection_key(cls):
         return InjectionKey(AwsTagProvider, name=cls.name)
 
-    def tag_filter(self)-> dict[str, list[str]]:
+    # pylint: disable=unused-argument
+    def tag_filter(self, strict:bool)-> dict[str, list[str]]:
         '''Returns a dictionary of key-value pairs.  Keys are tags,
         and values are lists of acceptable values.  Called by
         :class:`AwsConnection` to set up a filter that excludes
@@ -586,6 +655,12 @@ class AwsTagProvider(Injectable):
         See class documentation for caveats around which
         AwsTagProviders are used based on injector positioning between
         the tag provider and :class:`AwsConnection`.
+
+        :param strict: If true, return a strict filter to avoid false
+        positives for orphan detection.  If False, permissive tag
+        filters may be used to pick up objects after tagging policy
+        changes.
+
         '''
         return {}
 
@@ -641,7 +716,7 @@ class LayoutTagProvider(AwsTagProvider):
             'carthage:layout': layout.layout_name,
             }
 
-    def tag_filter(self):
+    def tag_filter(self, strict):
         try:
             config = self.injector(ConfigLayout)
             if config.layout_name:
@@ -655,7 +730,7 @@ class LayoutTagProvider(AwsTagProvider):
                 adopt = True
         except (KeyError, AsyncRequired):
             return {}
-        if adopt or not layout.layout_name:
+        if (adopt  and not strict) or not layout.layout_name:
             return {}
         return {
             'carthage:layout': [layout.layout_name],
@@ -664,7 +739,7 @@ class LayoutTagProvider(AwsTagProvider):
 #: An injection key to configure whether the layout adopts resources
 #that have a name produced by the layout but are not tagged as having
 #a layout.  Layouts should adopt resources if they predate support for
-#the layout tag provider, or if they are moving from no layout_name to
+#the layout filtag provider, or if they are moving from no layout_name to
 #a layout_name.
 carthage_aws_layout_adopt_resources = InjectionKey('carthage_aws.adopt_resources')
 

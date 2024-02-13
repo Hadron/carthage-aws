@@ -407,6 +407,19 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
         except AttributeError:
             return f'AwsSubnet: {self.name}'
 
+    # pylint: disable=redefined-builtin
+    @classmethod
+    @inject(injector=Injector)
+    def from_id(cls, id, name, *, injector):
+        '''
+        Create a dummy network to satisfy this_network.
+        '''
+        net = injector(Network, name=(name if name else '<unknown>'))
+        net.injector.add_provider(InjectionKey(AwsSubnet), cls)
+        net.injector.add_provider(InjectionKey('aws_id'), id)
+        net.injector.add_provider(InjectionKey('aws_readonly'), True)
+        return net.injector.get_instance(AwsSubnet)
+
 
     async def possible_ids_for_name(self):
         '''
