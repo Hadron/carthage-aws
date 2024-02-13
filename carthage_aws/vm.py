@@ -213,7 +213,7 @@ class AwsVm(AwsManaged, Machine):
         futures = []
         loop = asyncio.get_event_loop()
         res = await super().find()
-        if not (self.network_links or self.mob):
+        if not (self.network_links or self.mob or self.readonly):
             raise RuntimeError('AWS instances require a network link to create')
         for l in self.network_links.values():
             futures.append(loop.create_task(l.instantiate(AwsSubnet)))
