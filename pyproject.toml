@@ -43,6 +43,7 @@ disable = [
     "E0203",  # access-member-before-definition: 2
     "W0108",  # unnecessary-lambda: 4
     "W0718",  # late-binding-lambda: 3
+    
     "E0202",  # method-hidden: 2
     "C0415",  # import-outside-toplevel: 4
     "E0102",  # function-redefined: 4
@@ -52,6 +53,7 @@ disable = [
     "E0401",  # import-error: 4
     "E0611",  # no-name-in-module: 4
     'R0914', # Too many local variables: 5
+    'R0904', # too many public methods: 5
 ]
 
 [tool.pylint.DESIGN]
