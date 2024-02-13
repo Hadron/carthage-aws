@@ -251,9 +251,6 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
 
     '''
 
-    #: If true, create tags when the resource is created
-    include_tags = True
-
     stamp_type = "security-group"
     resource_type = "security_group"
     resource_factory_method='SecurityGroup'
@@ -378,11 +375,6 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
         return await run_in_executor(callback)
 
 
-    def resource_tags(self):
-        if self.include_tags and self.name:
-            return super().resource_tags()
-        return []
-
 
 
 # Decorated also with injection for route table after it is defined.
@@ -446,6 +438,9 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
         if not self.network.v4_config.network:
             self.readonly = True
             self.network.v4_config.network = self.mob.cidr_block
+
+    async def dynamic_dependencies(self):
+        return [self.vpc]
 
     def do_create(self):
         availability_zone = self._gfi("aws_availability_zone", default=None)
