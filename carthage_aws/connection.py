@@ -229,6 +229,8 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             tags = self.mob.tags
         except AttributeError:
             return None
+        if tags is None:
+            return None
         results = {}
         for t in tags:
             results[t['Key']] = t['Value']
