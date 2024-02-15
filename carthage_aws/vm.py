@@ -231,6 +231,39 @@ class AwsVm(AwsManaged, Machine):
                 self.ssh_online_command = 'systemctl --wait is-system-running'
         else:
             self._user_data = await self.user_data()
+
+        if getattr(self.model, 'win_init', False):
+            cloud_config = await self.ainjector(generate_win_init_cloud_config, model=self.model)
+            script_content = []
+            password = cloud_config.user_data.get('password', None)
+            if password:
+                script_content.append(f"net user Administrator {password}")
+            enable_winrm = cloud_config.user_data.get('winrm', False)
+            if enable_winrm:
+                script_content = script_content + [
+                    "winrm quickconfig -q",
+                    "winrm set winrm/config/service '@{{AllowUnencrypted=\"true\"}}'",
+                    "winrm set winrm/config/service/auth '@{{Basic=\"true\"}}'",
+                ]
+            user_data = {
+                'version': 1.0,
+                'tasks': [
+                    {
+                        'task': 'executeScript',
+                        'inputs': [
+                            {
+                                'frequency': 'always',
+                                'type': 'powershell',
+                                'runAs': 'localSystem',
+                                'content': "\n".join(script_content),
+                            }
+                        ]
+                    }
+                ]
+            }
+            self._user_data = yaml.dump(user_data)
+        else:
+            self._user_data = await self.user_data()
         self.image_id = await self.ainjector.get_instance_async('aws_ami')
         self.iam_profile = await self.ainjector.get_instance_async(InjectionKey("aws_iam_profile", _optional=True))
         await self.start_dependencies()
