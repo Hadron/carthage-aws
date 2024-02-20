@@ -222,18 +222,23 @@ class AwsVm(AwsManaged, Machine):
 
     async def pre_create_hook(self):
         # operation lock is held by overriding find_or_create
-        if getattr(self.model, 'cloud_init', False):
-            cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
+        _cloud_init = getattr(self.model, 'cloud_init', False)
+        _win_init = getattr(self.model, 'win_init', False)
+        cloud_config = await self.ainjector(generate_cloud_init_cloud_config, model=self.model)
+
+        if _cloud_init and _win_init:
+            raise ValueError("Can not win_init and cloud_init at the same time.")
+        if not _cloud_init and not _win_init:
+            self._user_data = await self.user_data()
+
+        if _cloud_init:
             user_data = "#cloud-config\n"
             user_data += yaml.dump(cloud_config.user_data, default_flow_style=False)
             self._user_data = user_data
             if self.ssh_online_command == Machine.ssh_online_command:
                 self.ssh_online_command = 'systemctl --wait is-system-running'
-        else:
-            self._user_data = await self.user_data()
 
-        if getattr(self.model, 'win_init', False):
-            cloud_config = await self.ainjector(generate_win_init_cloud_config, model=self.model)
+        if _win_init:
             script_content = []
             password = cloud_config.user_data.get('password', None)
             if password:
@@ -262,8 +267,7 @@ class AwsVm(AwsManaged, Machine):
                 ]
             }
             self._user_data = yaml.dump(user_data)
-        else:
-            self._user_data = await self.user_data()
+
         self.image_id = await self.ainjector.get_instance_async('aws_ami')
         self.iam_profile = await self.ainjector.get_instance_async(InjectionKey("aws_iam_profile", _optional=True))
         await self.start_dependencies()
