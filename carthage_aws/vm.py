@@ -138,7 +138,8 @@ class AwsVm(AwsManaged, Machine):
         By default it tries to see if the model has an attribute aws_user_data.
         '''
         if getattr(self, 'model', None):
-            await self.model.async_become_ready()
+            if isinstance(self.model, AsyncInjectable):
+                await self.model.async_become_ready()
             return getattr(self.model, 'aws_user_data', "")
         return ""
 
