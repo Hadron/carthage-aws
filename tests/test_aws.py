@@ -10,6 +10,7 @@ import asyncio
 import pytest
 
 from carthage import *
+from carthage import deployment
 from carthage.modeling import *
 from carthage.pytest import *
 from carthage.network import this_network
@@ -205,7 +206,7 @@ async def test_aws_subnet_create(ainjector):
         ainjector.add_provider(creation_vpc)
         vpc = None
         try:
-            vpc_to_cleanup = await ainjector(creation_vpc, readonly=True)
+            vpc_to_cleanup = await ainjector(creation_vpc, readonly=deployment.DryRun)
             await vpc_to_cleanup.ainjector(run_deployment_destroy)
         except LookupError:
             pass
