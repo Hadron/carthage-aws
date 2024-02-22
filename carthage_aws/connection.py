@@ -299,13 +299,13 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         self.mob = resource_factory(self.id)
         try:
             self.mob.load()
-        except ClientError as e:
+        except ClientError:
             if hasattr(self.mob, 'wait_until_exists'):
                 logger.info('Waiting for %s to exist', repr(self.mob))
                 self.mob.wait_until_exists()
                 self.mob.load()
             else:
-                logger.warning('Failed to load %s', self, exc_info=e)
+                logger.warning('Failed to load %s', self)
                 self.mob = None
                 if not self.readonly:
                     self.connection.invalid_ec2_resource(self.resource_type, self.id, name=self.name)
