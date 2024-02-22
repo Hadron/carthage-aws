@@ -230,7 +230,7 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         except AttributeError:
             return None
         if tags is None:
-            return None
+            return {}
         results = {}
         for t in tags:
             results[t['Key']] = t['Value']

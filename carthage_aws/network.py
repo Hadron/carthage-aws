@@ -821,6 +821,7 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
     def __init__(self, connectivity_type=None, **kwargs):
         super().__init__(**kwargs)
         self.network_links = {}
+        self._tags = []
         self.link = None
         self.subnet = None
         if connectivity_type:
@@ -848,7 +849,11 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
                 continue
             self.mob = g
             break
-
+        r = self.connection.client.describe_tags(
+            Filters=[{
+                'Name': 'resource-id',
+                            'Values': [self.id]}])
+        self._tags = r['Tags']
 
     async def pre_create_hook(self):
         # Note this hook is also called in delete to populate
@@ -923,5 +928,11 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
                     await vpc_address.delete()
             except Exception:
                 logger.exception('Deleting VPCAddress for %s', self)
+
+    def current_resource_tags(self):
+        results = {}
+        for t in self._tags:
+            results[t['Key']] = t['Value']
+        return results
 
 __all__ += ['AwsNatGateway']
