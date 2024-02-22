@@ -141,6 +141,7 @@ def attach_volume_task(*, device, volume, delete_on_termination=True):
 
     @setup_task(f"Attach {device}")
     @inject(vm=InjectionKey(AwsVm, _ready=False), volume=InjectionKey(volume, _ready=False))
+    # pylint: disable=unused-argument
     async def attach_volume(self, vm, volume):
         if not vm.mob:
             await vm.find_or_create()
@@ -150,7 +151,7 @@ def attach_volume_task(*, device, volume, delete_on_termination=True):
 
     @attach_volume.check_completed()
     @inject(vm=InjectionKey(AwsVm, _ready=False))
-    # pylint: disable=function-redefined
+    # pylint: disable=function-redefined, unused-argument
     async def attach_volume(self, vm):
         if not vm.mob:
             await vm.find()
