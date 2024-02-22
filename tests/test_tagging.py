@@ -57,7 +57,7 @@ async def test_tag_filter(our_ainjector):
     l2 = await ainjector.get_instance_async(InjectionKey(CarthageLayout, layout_name='layout_2'))
     await setup_layout(l1)
     await setup_layout(l2)
-    print(f'Layout 1 tag filter: {await l1.connection._tag_filter()}') # pylint: disable=protected-access
+    print(f'Layout 1 tag filter: {await l1.connection._tag_filter(False)}') # pylint: disable=protected-access
     try:
         await l1.vpc.async_become_ready()
         await l2.vpc.async_become_ready()
