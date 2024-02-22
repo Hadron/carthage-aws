@@ -141,7 +141,7 @@ def attach_volume_task(*, device, volume, delete_on_termination=True):
 
     @setup_task(f"Attach {device}")
     @inject(vm=InjectionKey(AwsVm, _ready=False), volume=InjectionKey(volume, _ready=False))
-    async def attach_volume(vm, volume):
+    async def attach_volume(self, vm, volume):
         if not vm.mob:
             await vm.find_or_create()
         volume.injector.add_provider(InjectionKey('aws_availability_zone'), vm.mob.subnet.availability_zone)
@@ -151,7 +151,7 @@ def attach_volume_task(*, device, volume, delete_on_termination=True):
     @attach_volume.check_completed()
     @inject(vm=InjectionKey(AwsVm, _ready=False))
     # pylint: disable=function-redefined
-    async def attach_volume(vm):
+    async def attach_volume(self, vm):
         if not vm.mob:
             await vm.find()
         if not vm.mob:
