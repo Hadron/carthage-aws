@@ -437,7 +437,7 @@ class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
             self.network.v4_config = V4Config()
         if not self.network.v4_config.network:
             self.readonly = True
-            self.network.v4_config.network = self.mob.cidr_block
+            self.network.v4_config.network = ipaddress.IPv4Network(self.mob.cidr_block)
 
     async def dynamic_dependencies(self):
         return [self.vpc]
