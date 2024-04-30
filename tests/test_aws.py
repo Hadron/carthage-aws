@@ -179,6 +179,11 @@ async def test_aws_subnet_create(ainjector):
         class route_table(AwsRouteTable):
             name = 'test_route_table'
 
+            routes = [
+                ('0.0.0.0/0', InjectionKey('test_igw')),
+            ]
+
+        @provides("test_igw")
         class igw(AwsInternetGateway):
 
             name = 'test_igw'
@@ -225,7 +230,8 @@ async def test_aws_subnet_create(ainjector):
             await vpc.private_subnet.access_by(AwsSubnet)
     finally:
         with TestTiming(2000):
-            print(await vpc.ainjector(run_deployment_destroy))
+            if vpc:
+                print(await vpc.ainjector(run_deployment_destroy))
 
 @async_test
 async def test_network_without_config(carthage_layout):

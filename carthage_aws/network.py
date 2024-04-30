@@ -378,7 +378,7 @@ class AwsSecurityGroup(AwsManaged, InjectableModel):
 
 
 # Decorated also with injection for route table after it is defined.
-@inject_autokwargs(connection = InjectionKey(AwsConnection, _ready=True),
+@inject_autokwargs(connection = InjectionKey(AwsConnection),
                    network=this_network,
                    vpc=InjectionKey(AwsVirtualPrivateCloud))
 class AwsSubnet(TechnologySpecificNetwork, AwsManaged):
@@ -894,7 +894,7 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
         try:
             await wait_for_state_change(
                 self, lambda obj: obj.mob['State'],
-                'available', ['pending'])
+                'available', ['pending'], timeout=400)
         finally:
             if self.mob['State'] == 'failed':
                 logger.error('%s failed: %s', self, self.mob["FailureMessage"])
@@ -914,7 +914,7 @@ class AwsNatGateway(carthage.machine.NetworkedModel, AwsManaged, InjectableModel
         await run_in_executor(callback)
         await wait_for_state_change(
             self, lambda obj: obj.mob['State'],
-            'deleted', ['available', 'pending', 'deleting'])
+            'deleted', ['available', 'pending', 'deleting', 'failed'], timeout=400)
         if delete_vpc_address is None:
             await self.pre_create_hook()
             delete_vpc_address = not self.link.merged_v4_config.public_address

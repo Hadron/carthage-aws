@@ -17,7 +17,7 @@ from carthage.config import ConfigLayout
 from carthage.dependency_injection import *
 from carthage.modeling import propagate_key, CarthageLayout
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, WaiterError
 
 #: Mapping of resource_types to classes that implement them
 aws_type_registry: dict[str,'AwsManaged'] = {}
@@ -152,7 +152,7 @@ class AwsConnection(AsyncInjectable):
 
 
 @inject_autokwargs(config_layout=ConfigLayout,
-                   connection=InjectionKey(AwsConnection, _ready=True),
+                   connection=InjectionKey(AwsConnection),
                                       readonly = InjectionKey("aws_readonly", _optional=NotPresent),
                    id=InjectionKey("aws_id", _optional=NotPresent),
                    )
@@ -302,11 +302,17 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         except ClientError:
             if hasattr(self.mob, 'wait_until_exists'):
                 logger.info('Waiting for %s to exist', repr(self.mob))
-                self.mob.wait_until_exists()
-                self.mob.load()
+                try:
+                    self.mob.wait_until_exists()
+                    self.mob.load()
+                except WaiterError:
+                    # probably It actually was deleting and now doesn't exist
+                    self.mob = None
+                    logger.info('%r failed to exist; assumed deleted')
             else:
                 logger.warning('Failed to load %s', self)
                 self.mob = None
+            if not self.mob:
                 if not self.readonly:
                     self.connection.invalid_ec2_resource(self.resource_type, self.id, name=self.name)
         return self.mob
@@ -342,10 +348,10 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
             return injector(cls, id=id, name=name, readonly=True)
 
     async def find(self):
-
         '''
         Find ourself from a name or id
         '''
+        await self.connection.async_become_ready()
         if self.id:
             return await run_in_executor(self.find_from_id)
         if self.name:
@@ -545,7 +551,8 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
 
 
 
-async def wait_for_state_change(obj, get_state_func, desired_state:str, wait_states: list[str]):
+async def wait_for_state_change(obj, get_state_func, desired_state:str, wait_states: list[str],
+                                timeout=300):
     '''
     Wait for a state transition, generally for objects without a boto3 resource implementation.
     So *get_state_func* typically decomposes whatever :meth:``find_from_id` puts in *mob*.
@@ -561,7 +568,6 @@ async def wait_for_state_change(obj, get_state_func, desired_state:str, wait_sta
     :param wait_states:  If one of these states persists, then continue to wait.
 
     '''
-    timeout = 300 # Turn this into a parameter if we need to adjust.
     state = get_state_func(obj)
     logged = False
     while timeout > 0:
