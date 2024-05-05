@@ -6,7 +6,7 @@ dependencies:
 python: .
 config:
   plugins:
-  - https://github.com/hadron/carthage_base
+  - https://github.com/hadron/carthage-base
 console_setup: |
   from carthage_aws import AwsVirtualPrivateCloud
   from carthage_aws import *
