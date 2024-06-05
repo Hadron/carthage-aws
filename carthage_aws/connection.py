@@ -687,12 +687,12 @@ class AwsTagProvider(Injectable):
     by the tag provider's :class:`Injector`:
 
     * Since :class:`AwsConnection` is typically added to
-      *base_injector*, in this configuration, only tag providers
-      *registered at the base injector will have their
-      *:meth:`tag_filter` methods called.  If tag providers are
-      *registered lower in the hierarchy that need to contribute to
-      *the tag filter, then :class:`AwsConnection` should also be
-      *registered lower in the hierarchy.
+      base_injector, in this configuration, only tag providers
+      registered at the base injector will have their
+      :meth:`tag_filter` methods called.  If tag providers are
+      registered lower in the hierarchy that need to contribute to
+     *the tag filter, then :class:`AwsConnection` should also be
+      registered lower in the hierarchy.
 
     * If a tag provider is added to an injector with *allow_multiple*
       False, then that tag provider can only access dependencies
@@ -801,7 +801,7 @@ class LayoutTagProvider(AwsTagProvider):
             if config.layout_name:
                 layout = self.injector.get_instance(InjectionKey(
                     CarthageLayout, layout_name=config.layout_name,
-                    _ready=True))
+                    _ready=False))
             else:
                 layout = self.injector.get_instance(InjectionKey(CarthageLayout, _ready=False))
             adopt = self.injector.get_instance(InjectionKey(carthage_aws_layout_adopt_resources, _optional=True))
