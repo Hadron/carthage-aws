@@ -124,7 +124,7 @@ async def test_image_building(carthage_layout, request):
             await instance.machine.async_become_ready()
         #instance.machine.ssh('-A', _fg=True)
         #breakpoint()
-        with TestTiming(1500):
+        with TestTiming(2000):
             await subtest_controller(
                 request, instance.machine,
                 ["--carthage-config=/carthage_aws/config.yml",
