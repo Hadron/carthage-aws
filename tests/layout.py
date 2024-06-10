@@ -116,9 +116,10 @@ class test_layout(CarthageLayout, PublicDnsManagement, AnsibleModelMixin):
         name = 'image-builder'
         layout_source = os.path.dirname(__file__)
         layout_destination = "carthage_aws"
-        aws_image_size = 8
+        aws_image_size = 10
         aws_iam_profile = "ec2_full"
         config_info = mako_task("config.yml.mako", output="carthage_aws/config.yml", config=InjectionKey(ConfigLayout))
+        disk_sizes = (12,)
 
         class install(MachineCustomization):
 
