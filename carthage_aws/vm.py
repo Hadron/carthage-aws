@@ -104,7 +104,6 @@ async def find_security_groups(l:NetworkLink,  *, ainjector):
 
 
 
-@inject_autokwargs(connection=InjectionKey(AwsConnection,_ready=True))
 class AwsVm(AwsManaged, Machine):
 
     pass_name_to_super = True
