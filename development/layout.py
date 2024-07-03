@@ -62,9 +62,12 @@ async def dev_layout(injector):
                 add_time_to_name=True)
 
         add_provider(DebianImage)
-        add_provider(machine_implementation_key, MaybeLocalAwsVm)
-        add_provider(InjectionKey(DnsZone, name=config.developer.domain, addressing='public'),
-                     when_needed(AwsHostedZone, name=config.developer.domain))
+        add_provider(machine_implementation_key, MaybeLocalAwsVm, allow_multiple=True)
+
+        @provides(InjectionKey(DnsZone, name=config.developer.domain, addressing='public'))
+        class dev_zone(AwsHostedZone, InjectableModel):
+            name = config.developer.domain
+            add_provider(destroy_policy, DeletionPolicy.warn)
         add_provider(WriteAuthorizedKeysPlugin, allow_multiple=True)
         add_provider(InjectionKey("aws_ami"),
                      image_provider(name='Carthage-Debian*',
