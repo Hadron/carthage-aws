@@ -34,7 +34,6 @@ class AwsHostedZone(AwsManaged, DnsZone):
 
         self.region = self.config_layout.aws.region
 
-        self.client = self.service_resource
         self.config = None
         self.nameservers = None
 
@@ -42,6 +41,10 @@ class AwsHostedZone(AwsManaged, DnsZone):
     @memoproperty
     def service_resource(self):
         return self.connection.connection.client('route53', region_name=self.connection.region)
+
+    @property
+    def client(self):
+        return self.service_resource
 
     def aws_propagate_key(cls): # pylint: disable=no-self-argument
         # We need to define this ourselves because we do not set
@@ -82,6 +85,7 @@ class AwsHostedZone(AwsManaged, DnsZone):
         '''
         Find ourself from a name or id
         '''
+        await self.connection.async_become_ready()
         if self.id:
             return await run_in_executor(self.find_from_id)
         if self.name:
