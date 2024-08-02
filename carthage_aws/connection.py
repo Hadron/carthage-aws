@@ -75,8 +75,11 @@ class AwsConnection(AsyncInjectable):
         )
         self.region = self.config.region
         self.client = self.connection.client('ec2', region_name=self.region)
-        for key in self.client.describe_key_pairs()['KeyPairs']:
-            self.keys.append(key['KeyName'])
+        try:
+            for key in self.client.describe_key_pairs()['KeyPairs']:
+                self.keys.append(key['KeyName'])
+        except ClientError:
+            pass #assume authorization error.
         tag_filter = await self._tag_filter(False)
         self.names_by_resource_type = await run_in_executor(self._inventory, tag_filter)
 
