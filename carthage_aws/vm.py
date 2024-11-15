@@ -17,7 +17,7 @@ from botocore.exceptions import ClientError
 from carthage import *
 from carthage.modeling import *
 from carthage.dependency_injection import *
-from carthage.machine import Machine, NetworkedModel
+from carthage.machine import Machine
 from carthage.network import NetworkLink
 from carthage.local import LocalMachineMixin
 from carthage.cloud_init import generate_cloud_init_cloud_config
@@ -327,7 +327,7 @@ class AwsVm(AwsManaged, Machine):
         return await super().post_find_hook()
 
     async def dynamic_dependencies(self):
-        result =  await NetworkedModel.dynamic_dependencies(self)
+        result =  await Machine.dynamic_dependencies(self)
         # In addition to the AwsSubnets, we need to depend on any
         # security group we use.  It turns out calculating that is
         # harder than I want to spend time on, so as a stop-gap depend
