@@ -1,4 +1,4 @@
-# Copyright (C) 2022, 2023, 2024, Hadron Industries, Inc.
+# Copyright (C) 2022, 2023, 2024, 2025, Hadron Industries, Inc.
 # Carthage is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License version 3
 # as published by the Free Software Foundation. It is distributed
@@ -8,7 +8,6 @@
 
 from pathlib import Path
 import asyncio
-import os
 import typing
 
 import carthage.network
@@ -197,6 +196,15 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         Which resource types to include in tag specifications.  Defaults to self.resource_type
         '''
         return [self.resource_type]
+
+    @property
+    def deployable_names(self):
+        res = []
+        if name := getattr(self, 'name', None):
+            res.append(f'{self.resource_type}:{name}')
+        if hasattr(super(), 'deployable_names'):
+            res.extend(super().deployable_names)
+        return res
 
     def should_retag(self) -> bool:
         '''Returns true if the resource's current tags do not align
@@ -504,11 +512,9 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
         '''
 
 
-    @memoproperty
-    def stamp_path(self):
-        p = Path(self.config_layout.state_dir)
-        p = p.joinpath("aws_stamps", self.stamp_type,str(self.id)+".stamps")
-        os.makedirs(p, exist_ok=True)
+    @property
+    def stamp_subdir(self):
+        p = Path("aws").joinpath(self.stamp_type,str(self.id))
         return p
 
     async def dynamic_dependencies(self):

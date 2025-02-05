@@ -35,6 +35,7 @@ disable = [
     "C0116",  # missing-function-docstring: 1
     "C0103",  # invalid-name: 1
     "W0401",  # wildcard-import: 3
+              'R0901', #too many instance ancestors
     "R0902",  # too-many-instance-attributes: 5
     "C0121",  # singleton-comparison: 3
     "W0614",  # unused-wildcard-import: 3
