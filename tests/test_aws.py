@@ -7,7 +7,6 @@
 # LICENSE for details.
 import asyncio
 
-import pytest
 
 from carthage import *
 from carthage import deployment
@@ -67,8 +66,10 @@ async def test_record_private_zone(carthage_layout):
 async def test_read_only(carthage_layout):
     layout = carthage_layout
     await layout.ainjector.get_instance_async(AwsConnection)
-    with pytest.raises(LookupError):
-        await layout.does_not_exist.machine.async_become_ready()
+    await layout.does_not_exist.machine.async_become_ready()
+    await layout.does_not_exist.machine.find()
+    assert not layout.does_not_exist.machine.mob
+
 
 @async_test
 async def test_create_volume(carthage_layout):
