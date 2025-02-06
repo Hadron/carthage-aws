@@ -363,8 +363,16 @@ class AwsManaged(SetupTaskMixin, AsyncInjectable):
                 self.id = resource_id
                 await run_in_executor(self.find_from_id)
                 if self.mob:
-                    return
+                    return self.mob
             self.id = None
+
+    async def async_ready(self):
+        '''Always run find, even for readonly objects.
+        '''
+        res = await super().async_ready()
+        if self.readonly:
+            await self.find()
+        return res
 
     async def possible_ids_for_name(self):
         resource_type = self.resource_type
