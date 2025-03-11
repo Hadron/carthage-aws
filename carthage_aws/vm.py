@@ -180,6 +180,7 @@ class AwsVm(AwsManaged, Machine):
                 network_link.merged_v4_config.address = private_address
                 if update_ip_address and self.aws_ip_address_is_private:
                     self.ip_address = str(private_address)
+                    self.ssh_recompute()
                     self._clear_ip_address = True
                 updated_private_links.append(network_link)
             if not interface.association_attribute:
@@ -204,6 +205,7 @@ class AwsVm(AwsManaged, Machine):
             updated_public_links.append(network_link)
             if update_ip_address and not self.aws_ip_address_is_private:
                 self.ip_address = str(address)
+                self.ssh_recompute()
                 self._clear_ip_address = True
         if updated_public_links or updated_private_links:
             self.ainjector.loop.call_soon_threadsafe(async_cb)
@@ -350,7 +352,7 @@ class AwsVm(AwsManaged, Machine):
                 await self.is_machine_running()
                 if self.running:
                     return
-                logger.info('Starting %s', self.name)
+            logger.info('Starting %s', self.name)
             await run_in_executor(self.mob.start)
             await run_in_executor(self.mob.wait_until_running)
             await self.is_machine_running()
@@ -361,6 +363,7 @@ class AwsVm(AwsManaged, Machine):
         async with self._operation_lock:
             if not self.running:
                 return
+            logger.info('Stopping %s', self.name)
             await run_in_executor(self.mob.stop)
             await run_in_executor(self.mob.wait_until_stopped)
             if self._clear_ip_address:
